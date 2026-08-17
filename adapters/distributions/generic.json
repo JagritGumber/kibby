@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "id": "generic",
+  "packageManager": null,
+  "allowAur": false,
+  "behavior": "verify-commands-only"
+}

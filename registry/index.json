@@ -1,0 +1,13 @@
+{
+  "$schema": "./schemas/registry-v1.json",
+  "schemaVersion": 1,
+  "packages": [
+    {
+      "id": "foundation",
+      "version": "0.1.0",
+      "kind": "foundation",
+      "manifest": "../packages/foundation/package.json"
+    }
+  ],
+  "components": []
+}

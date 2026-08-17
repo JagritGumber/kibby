@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "arch",
+  "packageManager": "pacman",
+  "allowAur": false,
+  "capabilities": {
+    "terminal": "kitty",
+    "launcher": "fuzzel",
+    "session-lock": "hyprlock",
+    "audio-control": "wireplumber",
+    "brightness-control": "brightnessctl",
+    "screenshot": ["grim", "slurp", "wl-clipboard", "jq"]
+  }
+}

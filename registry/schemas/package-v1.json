@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kibby.dev/schema/package-v1.json",
+  "type": "object",
+  "required": ["schemaVersion", "id", "name", "version", "kind", "license", "capabilities", "allowsPrivilegedHooks"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "name": { "type": "string" },
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "kind": { "enum": ["foundation", "quickshell-runtime", "component"] },
+    "license": { "type": "string" },
+    "capabilities": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "allowsPrivilegedHooks": { "const": false }
+  },
+  "additionalProperties": false
+}
