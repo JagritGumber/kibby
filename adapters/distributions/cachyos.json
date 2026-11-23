@@ -1,7 +1,0 @@
-{
-  "schemaVersion": 1,
-  "id": "cachyos",
-  "inherits": "arch",
-  "packageManager": "pacman",
-  "allowAur": false
-}
