@@ -1,0 +1,33 @@
+#!/bin/sh
+
+real_caelestia="${CAELESTIA_REAL_BIN:-/usr/bin/caelestia}"
+qs_bin="${CAELESTIA_QS_BIN:-/usr/bin/qs}"
+random_wallpaper=0
+
+if [ "${1-}" = "wallpaper" ]; then
+    for argument in "$@"; do
+        case "$argument" in
+            -r|--random)
+                random_wallpaper=1
+                ;;
+        esac
+    done
+fi
+
+"$real_caelestia" "$@"
+status=$?
+
+if [ "$status" -ne 0 ] || [ "$random_wallpaper" -ne 1 ]; then
+    exit "$status"
+fi
+
+state_home="${XDG_STATE_HOME:-${HOME}/.local/state}"
+wallpaper_state="${state_home}/caelestia/wallpaper/path.txt"
+
+if [ ! -s "$wallpaper_state" ]; then
+    printf '%s\n' "Caelestia selected no wallpaper: $wallpaper_state is missing or empty" >&2
+    exit 1
+fi
+
+IFS= read -r selected_wallpaper < "$wallpaper_state"
+exec "$qs_bin" -c caelestia ipc call wallpaper set "$selected_wallpaper"

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Keep the oldest Helium browser process. Extra mains steal the
+# profile lock and show "Something went wrong when opening your profile".
+set -euo pipefail
+
+mapfile -t mains < <(ps -eo pid=,etimes=,cmd= | awk '
+    $0 ~ /\/opt\/helium-browser-bin\/helium/ && $0 !~ /--type=/ && $0 !~ /crashpad/ {
+        print $2, $1
+    }' | sort -nr)
+
+(( ${#mains[@]} > 1 )) || exit 0
+
+read -r _ keep_pid <<<"${mains[0]}"
+for row in "${mains[@]:1}"; do
+    read -r _ pid <<<"$row"
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
+    kill "$pid" 2>/dev/null || true
+done
+
+sleep 0.3
+printf 'kept Helium pid %s, killed extra instances\n' "$keep_pid" >&2

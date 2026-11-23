@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+
+set -u
+
+# KIBBY_MIC_MUTE_LED_DEVICE in ~/.config/kibby/settings.env (see `brightnessctl --list`).
+led_device="${KIBBY_MIC_MUTE_LED_DEVICE:-${MIC_MUTE_LED_DEVICE:-platform::micmute}}"
+
+sync_led() {
+    local volume_state target
+
+    if ! volume_state="$(wpctl get-volume @DEFAULT_AUDIO_SOURCE@ 2>/dev/null)"; then
+        return 0
+    fi
+
+    if [[ "$volume_state" == *"[MUTED]"* ]]; then
+        target=1
+    else
+        target=0
+    fi
+
+    brightnessctl -q --device="$led_device" set "$target"
+}
+
+sync_led
+
+while true; do
+    while IFS= read -r event; do
+        case "$event" in
+            *" on source "*|*" on server "*|*" on card "*)
+                sync_led
+                ;;
+        esac
+    done < <(pactl subscribe 2>/dev/null)
+
+    # PipeWire may disappear across logout, restart, or resume. Reconcile once
+    # before reconnecting so the LED never remains stuck at its previous value.
+    sleep 1
+    sync_led
+done

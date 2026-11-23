@@ -1,0 +1,13 @@
+[Unit]
+Description=Synchronize the hardware microphone-mute LED with PipeWire
+After=pipewire.service pipewire-pulse.service wireplumber.service
+
+[Service]
+Type=simple
+EnvironmentFile=-%h/.config/kibby/settings.env
+ExecStart=%h/.local/bin/mic-mute-led-sync
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=default.target

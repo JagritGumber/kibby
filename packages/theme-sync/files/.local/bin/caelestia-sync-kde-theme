@@ -1,0 +1,282 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Apply Caelestia's generated colour scheme to KDE/Qt, GTK and folder icons.
+# Colours always come from this run.
+#
+# Dolphin's Material look comes from the caelestia Qt style plugin
+# (~/.local/src/caelestia-qtstyle), the session's widget style; the session puts
+# ~/.local/lib/qt6/plugins on QT_PLUGIN_PATH (uwsm env, hypr kibby/host.lua).
+# It reads the live palette, so Dolphin must follow kdeglobals rather than pin
+# its own colour scheme.
+#
+# Caelestia runs this after every wallpaper change (cli.json theme.postHook),
+# and Kibby's installer runs it once. Before the first wallpaper change there
+# is no generated scheme yet: the style, fonts and Dolphin settings still
+# apply, and caelestia-folders is built with Papirus's own folder colours.
+# Lines starting with "next: " say what is left; the installer lists them.
+
+config_home=${XDG_CONFIG_HOME:-$HOME/.config}
+data_home=${XDG_DATA_HOME:-$HOME/.local/share}
+state_home=${XDG_STATE_HOME:-$HOME/.local/state}
+source_scheme=$config_home/qtengine/caelestia.colors
+# plasma-apply-colorscheme does nothing when asked for the scheme that is
+# already current, even if its colours changed, so every theme change after
+# the first left KDE apps on the old colours. The scheme alternates between
+# two names instead; the one applied is always "new" to it.
+current_scheme=$(kreadconfig6 --file kdeglobals --group General --key ColorScheme)
+if [[ $current_scheme == Caelestia ]]; then
+    scheme_name=CaelestiaB
+    other_scheme=Caelestia
+else
+    scheme_name=Caelestia
+    other_scheme=CaelestiaB
+fi
+target_scheme=$data_home/color-schemes/$scheme_name.colors
+icon_theme=caelestia-folders
+
+if [[ -s $source_scheme ]]; then
+    install -d -m 0755 "$(dirname "$target_scheme")"
+    staged=$(mktemp "$target_scheme.XXXXXX")
+    trap 'rm -f "$staged"' EXIT
+    install -m 0644 "$source_scheme" "$staged"
+    mv -f "$staged" "$target_scheme"
+    trap - EXIT
+
+    plasma-apply-colorscheme "$scheme_name" >/dev/null
+    rm -f "$data_home/color-schemes/$other_scheme.colors"
+else
+    printf 'Caelestia KDE sync: no generated colour scheme yet (%s); applying the style and icons only\n' "$source_scheme" >&2
+fi
+kwriteconfig6 --file kdeglobals --group Icons --key Theme "$icon_theme"
+# caelestia = Darkly everywhere, plus the Material layout inside Dolphin.
+kwriteconfig6 --file kdeglobals --group KDE --key widgetStyle caelestia
+kwriteconfig6 --file kdeglobals --group General --key font "Rubik,13,-1,5,400,0,0,0,0,0,0,0,0,0,0,1"
+kwriteconfig6 --file kdeglobals --group General --key menuFont "Rubik,13,-1,5,400,0,0,0,0,0,0,0,0,0,0,1"
+kwriteconfig6 --file kdeglobals --group General --key toolBarFont "Rubik,12,-1,5,400,0,0,0,0,0,0,0,0,0,0,1"
+kwriteconfig6 --file kdeglobals --group General --key smallestReadableFont "Rubik,11,-1,5,400,0,0,0,0,0,0,0,0,0,0,1"
+kwriteconfig6 --file kdeglobals --group WM --key activeFont "Rubik,13,-1,5,400,0,0,0,0,0,0,0,0,0,0,1"
+# A pinned scheme sets an explicit app palette, which Qt never runs through the
+# style's polish(QPalette&) and KDE never updates when the wallpaper changes.
+kwriteconfig6 --file dolphinrc --group UiSettings --key ColorScheme --delete
+kwriteconfig6 --file dolphinrc --group 'KFileDialog Settings' --key 'Places Icons Auto-resize' false
+# 40px Places icons are 22px glyphs on padded canvases (symbolic/40 below); KIO
+# puts the label 4px after the icon box, so the padding is the icon-text gap.
+kwriteconfig6 --file dolphinrc --group 'KFileDialog Settings' --key 'Places Icons Static Size' 40
+kwriteconfig6 --file dolphinrc --group PlacesPanel --key IconSize 40
+kwriteconfig6 --file dolphinrc --group General --key ShowStatusBar FullWidth
+kwriteconfig6 --file dolphinrc --group General --key ShowZoomSlider true
+# The mock marks selection with a check badge only; Dolphin's hover toggle doubled it.
+kwriteconfig6 --file dolphinrc --group General --key ShowSelectionToggle false
+kwriteconfig6 --file qt6ct/qt6ct.conf --group Appearance --key icon_theme "$icon_theme"
+# GTK apps use the same icon theme as Qt ones.
+for gtk_dir in gtk-3.0 gtk-4.0; do
+    kwriteconfig6 --file "$config_home/$gtk_dir/settings.ini" --group Settings --key gtk-icon-theme-name "$icon_theme"
+done
+gsettings set org.gnome.desktop.interface icon-theme "$icon_theme" 2>/dev/null || true
+kwriteconfig6 --file qt6ct/qt6ct.conf --group Appearance --key style Darkly
+
+case ${SCHEME_MODE:-dark} in
+    light) kate_theme='Breeze Light' ;;
+    *) kate_theme='Breeze Dark' ;;
+esac
+kwriteconfig6 --file katerc --group 'KTextEditor Renderer' --key 'Auto Color Theme Selection' false
+kwriteconfig6 --file katerc --group 'KTextEditor Renderer' --key 'Color Theme' "$kate_theme"
+
+python3 - "$config_home" "$data_home" "$state_home" "$icon_theme" <<'PY'
+import colorsys
+import json
+import os
+import re
+import shutil
+import sys
+from pathlib import Path
+
+config_home, data_home, state_home, icon_theme = sys.argv[1:5]
+
+WALLPAPER_NEXT = (
+    "next: pick a wallpaper (Super+Shift+W, or run: caelestia wallpaper -f IMAGE). "
+    "Caelestia then colours KDE and GTK apps and recolours the caelestia-folders icons from it."
+)
+
+
+def load_colours() -> dict[str, str] | None:
+    """The current Caelestia scheme, or None before the first one exists."""
+    raw = os.environ.get("SCHEME_COLOURS")
+    if raw:
+        data = json.loads(raw)
+        return {k: v.lstrip("#") for k, v in data.items()}
+    scheme = Path(state_home) / "caelestia/scheme.json"
+    if not scheme.is_file():
+        return None
+    data = json.loads(scheme.read_text())
+    colours = data.get("colours") or data
+    return {k: str(v).lstrip("#") for k, v in colours.items()}
+
+
+def hls(hex6: str) -> tuple[float, float, float]:
+    h = hex6.lstrip("#")
+    return colorsys.rgb_to_hls(int(h[0:2], 16) / 255, int(h[2:4], 16) / 255, int(h[4:6], 16) / 255)
+
+
+colours = load_colours()
+
+if colours is not None:
+    from caelestia.utils.paths import templates_dir
+    from caelestia.utils.theme import gen_replace
+
+    gtk = gen_replace(colours, templates_dir / "gtk.css", hash=True)
+    thunar = gen_replace(colours, templates_dir / "thunar.css", hash=True)
+    for version in ("gtk-3.0", "gtk-4.0"):
+        dest = Path(config_home) / version
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / "gtk.css").write_text(gtk)
+        (dest / "thunar.css").write_text(thunar)
+
+src_root = Path(data_home) / "icons/Papirus"
+if not src_root.is_dir():
+    # papirus-icon-theme from the distribution, when there is no user copy.
+    src_root = Path("/usr/share/icons/Papirus")
+# Built in a hidden side folder and swapped in whole afterwards (see below):
+# rewriting the live theme in place let a Qt app that read it mid-build (the
+# shell at login) cache a broken theme and show no icons until restarted.
+dst_root = Path(data_home) / "icons" / f".{icon_theme}.staging"
+shutil.rmtree(dst_root, ignore_errors=True)
+if not src_root.is_dir():
+    print("next: install papirus-icon-theme (pacman), then run caelestia-sync-kde-theme to build the caelestia-folders icons.")
+    if colours is None:
+        print(WALLPAPER_NEXT)
+    raise SystemExit(0)
+dst_root.mkdir(parents=True)
+
+# Papirus paints its default folders with three blues: the front, the back and
+# the dark glyph on special folders. Each takes primary's hue and saturation at
+# a fixed lightness, so folders match the wallpaper exactly (papirus-folders
+# could only pick the nearest of its preset colours). Before the first scheme
+# exists the folders keep Papirus's own blues.
+papirus_blues = {"#5294e2": (0.70, 1.0), "#4877b1": (0.59, 1.0), "#1d344f": (0.24, 0.6)}
+recolour = {}
+if colours is not None:
+    primary_hue, _, primary_saturation = hls(colours["primary"])
+
+    def tone(lightness: float, saturation_scale: float) -> str:
+        r, g, b = colorsys.hls_to_rgb(primary_hue, lightness, min(1.0, primary_saturation * saturation_scale))
+        return "#{:02x}{:02x}{:02x}".format(round(r * 255), round(g * 255), round(b * 255))
+
+    recolour = {blue: tone(*spec) for blue, spec in papirus_blues.items()}
+else:
+    print(WALLPAPER_NEXT)
+hex_re = re.compile(r"#[0-9A-Fa-f]{6}\b")
+
+# Rebuild from scratch: a stale icon from an earlier source would win lookups.
+
+# Only the generic names apps ask for (folder, folder-documents, user-home,
+# inode-directory, ...); in Papirus they are symlinks to the blue variants.
+folder_dirs = {}
+for size in ("16", "22", "24", "32", "48", "64"):
+    spec = "Size=64\nMinSize=64\nMaxSize=256\nType=Scalable" if size == "64" else f"Size={size}\nType=Fixed"
+    folder_dirs[f"places/{size}"] = ("Places", spec)
+    dst_dir = dst_root / "places" / size
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    for src in (src_root / f"{size}x{size}" / "places").glob("*.svg"):
+        target = src.resolve()
+        if src.name.startswith(("folder-blue", "user-blue")) or not target.name.startswith(("folder-blue", "user-blue")):
+            continue
+        text = hex_re.sub(lambda m: recolour.get(m.group(0).lower(), m.group(0)), target.read_text())
+        (dst_dir / src.name).write_text(text)
+
+# Places asks for these names at 22px. KIconLoader tries shorter names inside
+# each theme before the next one, so without exact matches here Papirus's
+# colour user-home/folder icons win. Breeze's small icons use ColorScheme-Text
+# and follow the palette.
+breeze = [Path("/usr/share/icons/breeze-dark"), Path("/usr/share/icons/breeze")]
+symbolic = {
+    "user-home-symbolic": "user-home-symbolic",
+    "folder-symbolic": "folder-symbolic",
+    "folder-download-symbolic": "folder-download-symbolic",
+    # The mock: a clock for Recent Files, a plain folder for Recent Locations.
+    "folder-open-recent-symbolic": "folder-symbolic",
+    "document-open-recent-symbolic": "clock-symbolic",
+    "user-trash-symbolic": "user-trash-symbolic",
+    # KIO appends -full to the Trash bookmark's icon while the bin has files.
+    "user-trash-symbolic-full": "user-trash-full-symbolic",
+    # Dolphin ignores the bookmark and names the Trash icon itself.
+    "user-trash": "user-trash",
+    "user-trash-full": "user-trash-full",
+    "network-wireless-symbolic": "network-wireless-symbolic",
+    "input-gamepad-symbolic": "input-gamepad-symbolic",
+    "drive-harddisk-symbolic": "drive-harddisk-symbolic",
+    # Solid names the internal disk plainly.
+    "drive-harddisk": "drive-harddisk",
+}
+symbolic_dirs = {"symbolic/16": ("Places", "Size=16\nType=Fixed"), "symbolic/22": ("Places", "Size=22\nType=Fixed")}
+for subdir in symbolic_dirs:
+    size = subdir.split("/")[1]
+    dst_dir = dst_root / subdir
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    for name, source in symbolic.items():
+        found = next((f for root in breeze for f in sorted(root.glob(f"*/{size}/{source}.svg"))), None)
+        if found is not None:
+            shutil.copyfile(found, dst_dir / f"{name}.svg")
+
+# Dolphin's Places panel draws its label 4px after the icon box. The mock has a
+# ~20px gap, so Places uses 40px icons that are the 22px glyphs centred on a
+# padded canvas: widening the viewBox keeps the glyph at 22px.
+padded_size, glyph_size = 40, 22
+viewbox_re = re.compile(r'viewBox="\s*([-\d.]+)[\s,]+([-\d.]+)[\s,]+([-\d.]+)[\s,]+([-\d.]+)\s*"')
+padded_dir = dst_root / f"symbolic/{padded_size}"
+padded_dir.mkdir(parents=True, exist_ok=True)
+for src in (dst_root / f"symbolic/{glyph_size}").glob("*.svg"):
+    text = src.read_text()
+    match = viewbox_re.search(text)
+    if match is None:
+        continue
+    x, y, w, h = (float(v) for v in match.groups())
+    pad = (padded_size - glyph_size) / 2 * (w / glyph_size)
+    viewbox = f'viewBox="{x - pad:g} {y - pad:g} {w + 2 * pad:g} {h + 2 * pad:g}"'
+    text = viewbox_re.sub(viewbox, text, count=1)
+    text = re.sub(r'(<svg\b[^>]*?)\s(?:width|height)="[^"]*"', r"\1", text, count=2)
+    (padded_dir / src.name).write_text(text)
+symbolic_dirs[f"symbolic/{padded_size}"] = ("Places", f"Size={padded_size}\nType=Fixed")
+
+directories = {**symbolic_dirs, **folder_dirs}
+sections = "\n".join(f"[{d}]\nContext={context}\n{spec}\n" for d, (context, spec) in directories.items())
+(dst_root / "index.theme").write_text(
+    "[Icon Theme]\n"
+    "Name=Caelestia Folders\n"
+    "Comment=Papirus folders recoloured from the current Caelestia scheme\n"
+    "Inherits=Papirus-Dark,breeze-dark,breeze,hicolor\n"
+    "Example=folder\n"
+    "FollowsColorScheme=true\n"
+    "KDE-Extensions=.svg\n"
+    f"Directories={','.join(directories)}\n\n" + sections
+)
+PY
+
+staged_theme="$data_home/icons/.$icon_theme.staging"
+live="$data_home/icons/$icon_theme"
+# No staging folder means there was no Papirus to build from (said above).
+if [ -d "$staged_theme" ]; then
+    if command -v gtk-update-icon-cache >/dev/null; then
+        gtk-update-icon-cache -f "$staged_theme" >/dev/null 2>&1 || true
+    fi
+    # One atomic swap (renameat2 RENAME_EXCHANGE): readers see the old theme or
+    # the new one, never a half-written one.
+    # -T: both paths are the two things swapped, not "move into this folder".
+    if [ -d "$live" ]; then
+        if mv -T --exchange "$staged_theme" "$live"; then
+            rm -rf "$staged_theme"
+        else
+            printf 'Caelestia KDE sync: could not swap in the new icon theme; kept the old one\n' >&2
+        fi
+    else
+        mv -T "$staged_theme" "$live"
+    fi
+fi
+if command -v kbuildsycoca6 >/dev/null; then
+    kbuildsycoca6 >/dev/null 2>&1 || true
+fi
+# Running KDE apps drop their icon caches on this signal (kiconthemes).
+if command -v dbus-send >/dev/null; then
+    dbus-send --session --type=signal /KIconLoader org.kde.KIconLoader.iconChanged int32:0 2>/dev/null || true
+fi

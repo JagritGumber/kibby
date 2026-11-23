@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+real_hyprctl=/usr/bin/hyprctl
+
+if [[ ${1:-} == dispatch && ${2:-} == movetoworkspacesilent && $# -eq 3 ]]; then
+    target=${3%%,address:*}
+    window=${3#*,}
+    if [[ $target =~ ^-?[0-9]+$ || $target =~ ^special:[A-Za-z0-9._-]+$ ]] \
+        && [[ $window =~ ^address:0x[0-9A-Fa-f]+$ ]]; then
+        exec "$real_hyprctl" eval \
+            "return hl.dispatch(hl.dsp.window.move({ workspace = \"$target\", window = \"$window\", silent = true }))"
+    fi
+fi
+
+if [[ ${1:-} == dispatch && ${2:-} == focuswindow && $# -eq 3 ]]; then
+    window=$3
+    if [[ $window =~ ^address:0x[0-9A-Fa-f]+$ ]]; then
+        exec "$real_hyprctl" eval \
+            "return hl.dispatch(hl.dsp.focus({ window = \"$window\" }))"
+    fi
+fi
+
+exec "$real_hyprctl" "$@"

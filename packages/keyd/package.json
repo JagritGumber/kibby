@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 2,
+  "id": "keyd",
+  "name": "keyd: one Caps Lock, mouse workspace keys",
+  "version": "0.1.0",
+  "kind": "system",
+  "license": "GPL-3.0-or-later",
+  "description": "System files for /etc/keyd: route keyboards through keyd so every keyboard shares one Caps Lock state and Right Ctrl stays Right Ctrl, and optionally map a mouse's side buttons to workspace switching. Kibby renders them; you copy them with sudo.",
+  "dependencies": [],
+  "settings": [
+    "KIBBY_KEYD_KEYBOARD_IDS",
+    "KIBBY_KEYD_MOUSE_IDS"
+  ],
+  "systemFiles": [
+    {
+      "source": "system/etc/keyd/kibby-keyboards.conf",
+      "target": "/etc/keyd/kibby-keyboards.conf"
+    },
+    {
+      "source": "system/etc/keyd/kibby-mouse-desktops.conf",
+      "target": "/etc/keyd/kibby-mouse-desktops.conf",
+      "when": "KIBBY_KEYD_MOUSE_IDS"
+    }
+  ],
+  "notes": [
+    "After copying: sudo systemctl enable --now keyd && sudo keyd reload"
+  ],
+  "system": {
+    "pacman": [
+      "keyd"
+    ],
+    "aur": []
+  }
+}

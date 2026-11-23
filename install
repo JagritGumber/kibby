@@ -1,0 +1,454 @@
+#!/usr/bin/env python3
+"""Install Kibby packages into your home directory.
+
+    ./install --list                 the packages, one line each
+    ./install --deps [PACKAGE ...]   the pacman and AUR packages they need
+    ./install --dry-run [PACKAGE ...]
+    ./install [PACKAGE ...]          install (default: every package)
+
+    --settings FILE   use FILE as ~/.config/kibby/settings.env from now on
+
+Everything lands below $HOME. Files that would be replaced are backed up to
+~/.local/state/kibby/backups/<time>/ first. Once everything is in place it runs
+each package's postInstall commands (theme-sync applies the Dolphin style and
+icons). It never uses sudo and never runs systemctl: it prints the commands for
+system files, builds and user services instead, with whatever a postInstall
+command could not finish.
+"""
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent
+PACKAGES = REPO / "packages"
+DEFAULTS = REPO / "settings.default.env"
+PLACEHOLDER = re.compile(r"\{\{(HOME|KIBBY_[A-Z0-9_]+)\}\}")
+SETTING_NAME = re.compile(r"KIBBY_[A-Z0-9_]+")
+NUMBER = re.compile(r"-?[0-9]+(\.[0-9]+)?")
+
+
+def die(message):
+    print(f"kibby: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def read_env(path):
+    values = {}
+    for number, line in enumerate(path.read_text().splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, sep, value = line.partition("=")
+        key, value = key.strip(), value.strip()
+        if not sep or not SETTING_NAME.fullmatch(key):
+            die(f"{path}:{number}: expected KIBBY_NAME=value")
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        values[key] = value
+    return values
+
+
+def check_settings(settings, defaults):
+    for key, value in settings.items():
+        if key not in defaults:
+            print(f"kibby: warning: {key} is not a Kibby setting; it is ignored", file=sys.stderr)
+        if any(bad in value for bad in ('"', "\\", "\n", "{{", "}}")):
+            die(f"{key} contains a quote, backslash or {{{{ }}}}; plain values only")
+        if defaults.get(key) in ("true", "false") and value not in ("true", "false"):
+            die(f"{key} must be true or false, not {value!r}")
+        # Numbers land unquoted in QML and config files.
+        if NUMBER.fullmatch(defaults.get(key, "")) and not NUMBER.fullmatch(value):
+            die(f"{key} must be a number, not {value!r}")
+
+
+def load_packages():
+    packages = {}
+    for manifest in sorted(PACKAGES.glob("*/package.json")):
+        data = json.loads(manifest.read_text())
+        if data.get("schemaVersion") != 2:
+            die(f"{manifest}: Kibby reads schemaVersion 2 manifests")
+        if data.get("id") != manifest.parent.name:
+            die(f"{manifest}: id must match its folder name")
+        data["root"] = manifest.parent
+        packages[data["id"]] = data
+    return packages
+
+
+def resolve(packages, wanted):
+    """The wanted packages and everything they depend on, dependencies first."""
+    order, seen = [], set()
+
+    def visit(name, chain):
+        if name not in packages:
+            die(f"no package named {name!r} (see ./install --list)")
+        if name in chain:
+            die("dependency cycle: " + " -> ".join(chain + [name]))
+        if name in seen:
+            return
+        for dependency in packages[name].get("dependencies", []):
+            visit(dependency, chain + [name])
+        seen.add(name)
+        order.append(name)
+
+    for name in wanted:
+        visit(name, [])
+    return order
+
+
+def render(text, values, where):
+    def replace(match):
+        key = match.group(1)
+        if key not in values:
+            die(f"{where}: unknown setting {key}")
+        value = values[key]
+        # Lists of device IDs are written one per line.
+        if key.endswith("_IDS"):
+            value = "\n".join(value.split())
+        return value
+
+    return PLACEHOLDER.sub(replace, text)
+
+
+def render_bytes(data, values, where):
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data
+    return render(text, values, where).encode("utf-8")
+
+
+class Plan:
+    """Everything an install will do, worked out before anything is written."""
+
+    def __init__(self, home):
+        self.home = home
+        self.stamp = time.strftime("%Y%m%d-%H%M%S")
+        self.backup_root = home / ".local/state/kibby/backups" / self.stamp
+        self.writes = []      # (target, bytes, mode, package)
+        self.upstreams = []   # (package, entry)
+        self.links = []       # (link, target, package)
+        self.system = []      # (rendered path in home, real target)
+        self.builds = []      # (package, command)
+        self.notes = []       # (package, note)
+        self.post = []        # (package, command, required tools)
+        self.unchanged = 0
+
+    def write(self, target, data, mode, package):
+        if target.is_file() and not target.is_symlink():
+            if target.read_bytes() == data and (target.stat().st_mode & 0o777) == mode:
+                self.unchanged += 1
+                return
+        self.writes.append((target, data, mode, package))
+
+
+def plan_package(plan, package, values):
+    home = plan.home
+    files = package["root"] / "files"
+    # Files a program rewrites itself (Caelestia regenerates them on every
+    # colour change): written once, then left to that program.
+    seeds = set(package.get("seed", []))
+    if files.is_dir():
+        for source in sorted(p for p in files.rglob("*") if p.is_file()):
+            relative = source.relative_to(files)
+            if str(relative) in seeds and (home / relative).exists():
+                plan.unchanged += 1
+                continue
+            data = render_bytes(source.read_bytes(), values, f"{package['id']}/files/{relative}")
+            mode = source.stat().st_mode & 0o777
+            plan.write(home / relative, data, mode, package["id"])
+
+    for entry in package.get("upstream", []):
+        plan.upstreams.append((package, entry))
+
+    for service in package.get("services", []):
+        wants = home / ".config/systemd/user" / f"{service['wantedBy']}.wants"
+        unit = service.get("provided") or str(home / ".config/systemd/user" / service["unit"])
+        for instance in service.get("instances", [None]):
+            name = service["unit"].replace("@.", f"@{instance}.") if instance else service["unit"]
+            link = wants / name
+            if link.is_symlink() and os.readlink(link) == unit:
+                plan.unchanged += 1
+                continue
+            plan.links.append((link, unit, package["id"]))
+
+    for item in package.get("systemFiles", []):
+        condition = item.get("when")
+        if condition and not values.get(condition):
+            continue
+        source = package["root"] / item["source"]
+        data = render_bytes(source.read_bytes(), values, f"{package['id']}/{item['source']}")
+        staged = home / ".local/state/kibby/system" / item["target"].lstrip("/")
+        plan.write(staged, data, 0o644, package["id"])
+        plan.system.append((staged, item["target"]))
+
+    for command in package.get("build", []):
+        plan.builds.append((package["id"], command))
+    for note in package.get("notes", []):
+        plan.notes.append((package["id"], note))
+    for step in package.get("postInstall", []):
+        command = render(step["run"], values, f"{package['id']}/postInstall")
+        plan.post.append((package["id"], command, step.get("requires", [])))
+
+
+def init_lua(packages, installed):
+    lines = [
+        "-- Written by Kibby's installer: the Hyprland modules of every installed",
+        "-- Kibby package, in dependency order. Rerun ./install to update it.",
+        "",
+    ]
+    for name in resolve(packages, sorted(installed)):
+        for module in packages[name].get("hyprland", []):
+            lines.append(f'require("{module}")')
+    return ("\n".join(lines) + "\n").encode()
+
+
+def backup(plan, target):
+    try:
+        relative = target.relative_to(plan.home)
+    except ValueError:
+        die(f"refusing to touch {target}: outside {plan.home}")
+    destination = plan.backup_root / relative
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if target.is_dir() and not target.is_symlink():
+        shutil.move(str(target), str(destination))
+    else:
+        shutil.copy2(target, destination, follow_symlinks=False)
+    return destination
+
+
+def write_file(plan, target, data, mode):
+    if target.exists() or target.is_symlink():
+        backup(plan, target)
+        if target.is_symlink():
+            target.unlink()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as handle:
+        handle.write(data)
+    os.chmod(handle.name, mode)
+    os.replace(handle.name, target)
+
+
+def git(*args, cwd=None):
+    subprocess.run(["git", *args], cwd=cwd, check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+
+def fetch(home, entry):
+    """A clean checkout of an upstream commit, cached below ~/.cache/kibby."""
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", entry["name"]).strip("-")
+    cache = home / ".cache/kibby/upstream" / f"{slug}-{entry['commit'][:12]}"
+    if (cache / ".git").is_dir():
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=cache, capture_output=True, text=True)
+        if head.returncode == 0 and head.stdout.strip() == entry["commit"]:
+            return cache
+        shutil.rmtree(cache)
+    cache.mkdir(parents=True)
+    try:
+        git("init", "-q", cwd=cache)
+        git("remote", "add", "origin", entry["url"], cwd=cache)
+        git("fetch", "-q", "--depth", "1", "origin", entry["commit"], cwd=cache)
+        git("-c", "advice.detachedHead=false", "checkout", "-q", "--detach", "FETCH_HEAD", cwd=cache)
+    except subprocess.CalledProcessError as error:
+        shutil.rmtree(cache, ignore_errors=True)
+        die(f"could not fetch {entry['name']} at {entry['commit'][:12]}: {error.stderr.decode().strip()}")
+    return cache
+
+
+def apply_upstream(plan, package, entry):
+    home = plan.home
+    cache = fetch(home, entry)
+    if entry["mode"] == "files":
+        for source, destination in entry["files"].items():
+            data = (cache / source).read_bytes()
+            target = home / destination
+            if target.is_file() and target.read_bytes() == data:
+                continue
+            write_file(plan, target, data, 0o644)
+            print(f"  {destination}  (from {entry['name']})")
+        return
+
+    if entry["mode"] != "checkout":
+        die(f"{package['id']}: unknown upstream mode {entry['mode']!r}")
+    target = home / entry["dest"]
+    label = f"{entry['name']} {entry.get('ref', '')} @ {entry['commit'][:12]}".replace("  ", " ")
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=target, capture_output=True, text=True) \
+        if (target / ".git").is_dir() else None
+    clean = subprocess.run(["git", "status", "--porcelain"], cwd=target, capture_output=True, text=True) \
+        if head and head.returncode == 0 else None
+    if head and head.stdout.strip() == entry["commit"] and clean and clean.stdout == "":
+        print(f"  {entry['dest']}  unchanged ({label})")
+        return
+    if target.exists() or target.is_symlink():
+        print(f"  {entry['dest']}  backed up to {backup(plan, target)}")
+    shutil.copytree(cache, target, symlinks=True)
+    print(f"  {entry['dest']}  {label}")
+
+
+def shown(command, home):
+    """A command as the user would type it: ~ for the home directory."""
+    return "~" + command[len(str(home)):] if command.startswith(f"{home}/") else command
+
+
+def run_post_install(plan):
+    """Run each package's postInstall commands once everything is in place.
+
+    A command whose tools are missing is left as a next step. Lines a command
+    prints that start with "next: " say what it could not finish; they become
+    next steps too. Returns those next steps.
+    """
+    later = []
+    for package, command, requires in plan.post:
+        missing = [tool for tool in requires if shutil.which(tool) is None]
+        if missing:
+            later.append(f"{shown(command, plan.home)}   # {package}: install {', '.join(missing)} first")
+            continue
+        result = subprocess.run([command], capture_output=True, text=True)
+        for line in result.stdout.splitlines():
+            if line.startswith("next: "):
+                later.append(f"{line[len('next: '):]}   # {package}")
+        if result.returncode == 0:
+            print(f"  ran     {shown(command, plan.home)}  [{package}]")
+        else:
+            reason = (result.stderr.strip().splitlines() or [f"exit {result.returncode}"])[-1]
+            later.append(f"{shown(command, plan.home)}   # {package}: failed ({reason}); run it again once that is fixed")
+    return later
+
+
+def check_pins(packages, names):
+    """Warn when an installed system package differs from the version Kibby was built against."""
+    if not shutil.which("pacman"):
+        return
+    for name in names:
+        for system_package, wanted in packages[name].get("system", {}).get("pins", {}).items():
+            result = subprocess.run(["pacman", "-Q", system_package], capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"kibby: note: {system_package} is not installed (Kibby expects {wanted})")
+                continue
+            have = result.stdout.split()[1]
+            if not have.startswith(wanted):
+                print(f"kibby: note: {system_package} is {have}; this configuration was made with {wanted}")
+
+
+def print_deps(packages, names):
+    pacman, aur, pins = [], [], {}
+    for name in names:
+        system = packages[name].get("system", {})
+        pacman += [p for p in system.get("pacman", []) if p not in pacman]
+        aur += [p for p in system.get("aur", []) if p not in aur]
+        pins.update(system.get("pins", {}))
+    print("# Official repositories")
+    print("sudo pacman -S --needed " + " ".join(sorted(pacman)))
+    print("# AUR (any helper; yay shown)")
+    print("yay -S --needed " + " ".join(sorted(aur)))
+    if pins:
+        print("# Versions this configuration was made with")
+        for system_package, version in sorted(pins.items()):
+            print(f"#   {system_package} {version}")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="install", description="Install Kibby packages into your home directory.")
+    parser.add_argument("packages", nargs="*", help="packages to install (default: all)")
+    parser.add_argument("--list", action="store_true", help="list the packages")
+    parser.add_argument("--deps", action="store_true", help="print the pacman and AUR packages needed")
+    parser.add_argument("--dry-run", action="store_true", help="show what would change; write nothing")
+    parser.add_argument("--settings", type=Path, help="settings file to use (becomes ~/.config/kibby/settings.env)")
+    args = parser.parse_args()
+
+    packages = load_packages()
+    names = resolve(packages, args.packages or sorted(packages))
+
+    if args.list:
+        for name in sorted(packages):
+            package = packages[name]
+            print(f"{name:18} {package['version']:7} {package['name']}")
+        return
+    if args.deps:
+        print_deps(packages, names)
+        return
+
+    home = Path.home()
+    defaults = read_env(DEFAULTS)
+    settings_path = home / ".config/kibby/settings.env"
+    source = args.settings or (settings_path if settings_path.is_file() else DEFAULTS)
+    if not source.is_file():
+        die(f"no settings file at {source}")
+    settings = {**defaults, **read_env(source)}
+    check_settings(settings, defaults)
+    values = {"HOME": str(home), **settings}
+
+    plan = Plan(home)
+    if source != settings_path:
+        plan.write(settings_path, source.read_bytes(), 0o644, "settings")
+    for name in names:
+        plan_package(plan, packages[name], values)
+
+    state_path = home / ".local/state/kibby/installed.json"
+    state = json.loads(state_path.read_text()) if state_path.is_file() else {"packages": {}}
+    installed = {n for n in state["packages"] if n in packages} | set(names)
+    if "hyprland" in installed:
+        plan.write(home / ".config/hypr/kibby/init.lua", init_lua(packages, installed), 0o644, "hyprland")
+
+    print(f"Kibby: {len(names)} packages into {home} (settings: {source})")
+    for target, _, _, package in plan.writes:
+        verb = "replace" if target.exists() else "add"
+        print(f"  {verb:7} {target.relative_to(home)}  [{package}]")
+    for package, entry in plan.upstreams:
+        where = entry.get("dest") or ", ".join(sorted({str(Path(d).parent) for d in entry["files"].values()}))
+        print(f"  fetch   {entry['name']} {entry.get('ref', entry['commit'][:12])} -> {where}  [{package['id']}]")
+    for link, unit, package in plan.links:
+        print(f"  enable  {link.relative_to(home)}  [{package}]")
+    for package, command, _ in plan.post:
+        print(f"  run     {shown(command, home)}  [{package}]")
+    print(f"  ({plan.unchanged} files already up to date)")
+
+    if args.dry_run:
+        print("Dry run: nothing was written.")
+        return
+
+    for target, data, mode, _ in plan.writes:
+        write_file(plan, target, data, mode)
+    for package, entry in plan.upstreams:
+        apply_upstream(plan, package, entry)
+    for link, unit, _ in plan.links:
+        if link.is_symlink() and os.readlink(link) == unit:
+            continue
+        if link.exists() or link.is_symlink():
+            backup(plan, link)
+            link.unlink()
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(unit)
+
+    for name in names:
+        state["packages"][name] = {"version": packages[name]["version"], "installed": plan.stamp}
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
+
+    later = run_post_install(plan)
+    if plan.backup_root.is_dir():
+        print(f"Replaced files are kept in {plan.backup_root}")
+    check_pins(packages, names)
+    steps = []
+    if plan.links:
+        steps.append("systemctl --user daemon-reload   # then log out and back in")
+    steps += [f"sudo install -Dm644 {staged} {target}" for staged, target in plan.system]
+    steps += [f"{command}   # {package}" for package, command in plan.builds]
+    steps += later
+    steps += [f"{note}   # {package}" for package, note in plan.notes]
+    if steps:
+        print("\nNext steps:")
+        for step in steps:
+            print(f"  {step}")
+
+
+if __name__ == "__main__":
+    main()

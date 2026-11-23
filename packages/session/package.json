@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 2,
+  "id": "session",
+  "name": "Session environment",
+  "version": "0.1.0",
+  "kind": "config",
+  "license": "GPL-3.0-or-later",
+  "description": "The uwsm session environment (Qt platform theme, the user Qt plugin path, cursor theme) and which portals serve which requests.",
+  "dependencies": [],
+  "system": {
+    "pacman": [
+      "uwsm",
+      "xdg-desktop-portal-hyprland",
+      "xdg-desktop-portal-gtk",
+      "xdg-desktop-portal-kde"
+    ],
+    "aur": [
+      "bibata-cursor-theme-bin"
+    ]
+  }
+}

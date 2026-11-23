@@ -1,0 +1,24 @@
+[DetailsMode]
+IconSize=32
+PreviewSize=32
+
+[General]
+ShowSelectionToggle=false
+ShowStatusBar=FullWidth
+ShowZoomSlider=true
+Version=202
+ViewPropsTimestamp=2026,8,15,5,34,5.044
+
+[IconsMode]
+IconSize=80
+PreviewSize=96
+
+[KFileDialog Settings]
+Places Icons Auto-resize=false
+Places Icons Static Size=40
+
+[MainWindow]
+MenuBar=Disabled
+
+[PlacesPanel]
+IconSize=40

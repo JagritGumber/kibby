@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+mode="${1:-ocr}"
+case "$mode" in
+    ocr|translate) ;;
+    *)
+        printf 'Usage: %s {ocr|translate}\n' "${0##*/}" >&2
+        exit 2
+        ;;
+esac
+
+for command in grim slurp wl-copy notify-send; do
+    if ! command -v "$command" >/dev/null 2>&1; then
+        notify-send -u critical "Screen text" "Missing required command: $command"
+        exit 1
+    fi
+done
+
+runtime_dir="${XDG_RUNTIME_DIR:-/tmp}"
+image="$(mktemp --tmpdir="$runtime_dir" kibby-screen-text.XXXXXX.png)"
+trap 'rm -f "$image"' EXIT
+
+geometry="$(slurp)" || exit 0
+[[ -n "$geometry" ]] || exit 0
+grim -g "$geometry" "$image"
+
+# RapidOCR is optional (`uv tool install rapidocr`); kibby-rapidocr runs on
+# that tool's own Python, so use it only when that Python exists.
+rapidocr="$HOME/.local/bin/kibby-rapidocr"
+rapidocr_python="$HOME/.local/share/uv/tools/rapidocr/bin/python"
+if [[ -x "$rapidocr" && -x "$rapidocr_python" ]]; then
+    if ! text="$("$rapidocr" "$image")"; then
+        notify-send -u critical "Screen text" "OCR failed to read the selected region."
+        exit 1
+    fi
+elif command -v tesseract >/dev/null 2>&1; then
+    tessdata="$HOME/.local/share/kibby-screen-text/tessdata"
+    if [[ -f "$tessdata/chi_sim.traineddata" ]]; then
+        text="$(tesseract "$image" stdout --tessdata-dir "$tessdata" \
+            -l "${KIBBY_OCR_LANG:-chi_sim+eng}" --psm "${KIBBY_OCR_PSM:-6}" 2>/dev/null)"
+    else
+        text="$(tesseract "$image" stdout -l "${KIBBY_OCR_LANG:-eng}" \
+            --psm "${KIBBY_OCR_PSM:-6}" 2>/dev/null)"
+    fi
+else
+    notify-send -u critical "Screen text" "No OCR engine is installed."
+    exit 1
+fi
+if [[ -z "${text//[[:space:]]/}" ]]; then
+    notify-send -u normal "Screen text" "No text found in the selected region."
+    exit 1
+fi
+
+result="$text"
+title="OCR copied"
+
+if [[ "$mode" == "translate" ]]; then
+    if ! command -v trans >/dev/null 2>&1; then
+        notify-send -u critical "Screen text" "Translate Shell (trans) is not installed."
+        exit 1
+    fi
+
+    target="${KIBBY_TRANSLATE_TARGET:-}"
+    if [[ -z "$target" ]]; then
+        if command -v fuzzel >/dev/null 2>&1; then
+            choice="$(printf '%s\n' \
+                'en  English' \
+                'hi  Hindi' \
+                'es  Spanish' \
+                'fr  French' \
+                'de  German' \
+                'ja  Japanese' \
+                'ko  Korean' \
+                'zh-CN  Chinese (Simplified)' \
+                | fuzzel --dmenu --prompt='Translate to: ')" || exit 0
+            target="${choice%%[[:space:]]*}"
+        else
+            target="en"
+        fi
+    fi
+
+    [[ -n "$target" ]] || exit 0
+    # A language code such as en, zh-CN or pt-BR; anything else is refused.
+    if [[ ! "$target" =~ ^[A-Za-z]{2,3}(-[A-Za-z]{2,4})?$ ]]; then
+        notify-send -u critical "Screen text" "Unknown language code: $target"
+        exit 1
+    fi
+    if grep -qP '\p{Han}' <<<"$text"; then
+        translation_input="${text//$'\n'/}"
+    else
+        translation_input="${text//$'\n'/ }"
+    fi
+    # -- ends trans's options, so OCR text that starts with "-" stays text.
+    result="$(trans -b -no-ansi -t "$target" -- "$translation_input" 2>/dev/null)"
+    if [[ -z "${result//[[:space:]]/}" ]]; then
+        notify-send -u critical "Screen text" "Translation failed. OCR text was left unchanged."
+        exit 1
+    fi
+    title="Translation copied"
+fi
+
+printf '%s' "$result" | wl-copy
+preview="${result:0:320}"
+notify-send -u low "$title" "$preview"

@@ -1,0 +1,21 @@
+{
+  "theme": {
+    "enableTerm": false,
+    "enableHypr": false,
+    "enableDiscord": false,
+    "enableSpicetify": false,
+    "enablePandora": false,
+    "enableFuzzel": true,
+    "enableBtop": false,
+    "enableNvtop": false,
+    "enableHtop": false,
+    "enableGtk": false,
+    "enableQt": true,
+    "enableWarp": false,
+    "enableChromium": false,
+    "enableZed": false,
+    "enableCava": false,
+    "iconTheme": "caelestia-folders",
+    "postHook": "{{HOME}}/.local/bin/caelestia-sync-kde-theme"
+  }
+}

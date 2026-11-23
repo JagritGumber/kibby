@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Wispr Flow, per desktop.
+#
+# Hyprland: Wispr's bottom bar stays hidden. The edge glow
+# (~/.config/quickshell/wispr-glow) shows dictation instead and turns red on
+# errors, which also arrive as notifications. With the bar hidden the port
+# runs on native Wayland.
+# Plasma: the patched Flow Bar is shown; the port needs XWayland for its
+# click-through there.
+set -euo pipefail
+wispr_desktop="${XDG_CURRENT_DESKTOP:-${XDG_SESSION_DESKTOP:-}}"
+case "${wispr_desktop,,}" in
+    *kde*|*plasma*)
+        export WISPR_FLOW_HIDE_STATUS_WINDOW=0
+        export WISPR_FLOW_TRANSIENT_STATUS_WINDOW=0
+        export WISPR_FLOW_COMPACT_STATUS_WINDOW=1
+        export WISPR_FLOW_BACKEND=x11
+        ;;
+    *hyprland*)
+        export WISPR_FLOW_HIDE_STATUS_WINDOW=1
+        export WISPR_FLOW_TRANSIENT_STATUS_WINDOW=0
+        # Translates the port's old hyprctl dispatch calls for the Lua config.
+        export PATH="$HOME/.local/lib/wispr-flow/hyprland-compat:$PATH"
+        ;;
+esac
+exec /usr/bin/wispr-flow "$@"

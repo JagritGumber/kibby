@@ -1,0 +1,7 @@
+#!/bin/sh
+# hypridle runs this as a single executable. Lock first, then mark Helium
+# (when Kibby's helium package is installed).
+pidof hyprlock >/dev/null || hyprlock &
+hook="$HOME/.local/bin/helium-sleep-hook"
+[ -x "$hook" ] && "$hook" before
+exit 0

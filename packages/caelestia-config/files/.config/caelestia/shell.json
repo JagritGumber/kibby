@@ -1,0 +1,86 @@
+{
+    "appearance": {
+        "transparency": {
+            "enabled": true
+        }
+    },
+    "bar": {
+        "activeWindow": {
+            "compact": true,
+            "inverted": true
+        },
+        "scrollActions": {
+            "workspaces": true
+        },
+        "statusIcons": [
+            {
+                "enabled": true,
+                "id": "lockStatus"
+            },
+            {
+                "enabled": false,
+                "id": "audio"
+            },
+            {
+                "enabled": false,
+                "id": "microphone"
+            },
+            {
+                "enabled": false,
+                "id": "kbLayout"
+            },
+            {
+                "enabled": true,
+                "id": "network"
+            },
+            {
+                "enabled": true,
+                "id": "bluetooth"
+            },
+            {
+                "enabled": true,
+                "id": "battery"
+            }
+        ],
+        "tray": {
+            "background": true,
+            "compact": false,
+            "recolour": false
+        },
+        "workspaces": {
+            "perMonitor": false,
+            "showWindows": true,
+            "showWindowsOnSpecialWorkspaces": true,
+            "shown": 3
+        }
+    },
+    "general": {
+        "apps": {
+            "audio": [
+                "pwvucontrol"
+            ],
+            "explorer": [
+                "dolphin"
+            ],
+            "terminal": [
+                "alacritty"
+            ]
+        },
+        "battery": {
+            "criticalLevel": -1,
+            "warnLevels": [
+            ]
+        }
+    },
+    "osd": {
+        "enableMicrophone": true
+    },
+    "services": {
+        "maxVolume": 1.7
+    },
+    "utilities": {
+        "toasts": {
+            "fullscreen": "important"
+        }
+    }
+}

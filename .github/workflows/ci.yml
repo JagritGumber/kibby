@@ -4,14 +4,57 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  rust:
+  install:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+          fetch-depth: 0
+
+      - name: Tools
+        run: sudo apt-get update -q && sudo apt-get install -y -q lua5.4
+
+      - name: Manifests and scripts parse
+        run: |
+          for f in packages/*/package.json; do python3 -m json.tool "$f" > /dev/null; done
+          python3 -m py_compile install
+          grep -rlE '^#!.*\b(ba)?sh\b' packages | while read -r f; do bash -n "$f"; done
+
+      - name: wispr-glow cava range matches
+        run: |
+          dir=packages/wispr-glow/files/.config/quickshell/wispr-glow
+          conf=$(sed -n 's/^ascii_max_range *= *\([0-9][0-9]*\).*/\1/p' "$dir/cava-microphone.conf")
+          qml=$(sed -n 's/.*readonly property int cavaRange: *\([0-9][0-9]*\).*/\1/p' "$dir/WisprActivity.qml")
+          echo "cava ascii_max_range=$conf, WisprActivity cavaRange=$qml"
+          test -n "$conf" && test "$conf" = "$qml"
+
+      - name: List and dependencies
+        run: |
+          ./install --list
+          ./install --deps
+
+      - name: Install into a throwaway home
+        run: |
+          home=$(mktemp -d)
+          HOME="$home" ./install --dry-run
+          HOME="$home" ./install
+          if grep -rIl --exclude-dir=.git -E '\{\{(HOME|KIBBY_[A-Z0-9_]+)\}\}' "$home/.config" "$home/.local"; then
+            echo "placeholders were left unrendered"; exit 1
+          fi
+          find "$home/.config/hypr" -name '*.lua' -exec luac5.4 -p {} +
+          pinned=$(python3 -c 'import json; print(json.load(open("packages/caelestia-shell/package.json"))["upstream"][0]["commit"])')
+          test "$(git -C "$home/.config/quickshell/caelestia" rev-parse HEAD)" = "$pinned"
+          HOME="$home" ./install | tee second-run.txt
+          grep -q 'caelestia  unchanged' second-run.txt
+          grep -q '(0 files already up to date)' second-run.txt && { echo "second run rewrote files"; exit 1; } || true
+
+      - name: Secret scan
+        run: |
+          curl -sSfL -o gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          ./gitleaks git --no-banner --redact .

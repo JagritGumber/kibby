@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ ${1:-} == "--dry-run" ]]; then
+    printf 'Zoom mouse mode: right-click\n'
+    exit 0
+fi
+
+# Let Zoom finish mapping its full-screen annotation input surface before
+# sending the documented Linux shortcut for returning to Mouse mode.
+sleep 0.35
+ydotool click 0xC1

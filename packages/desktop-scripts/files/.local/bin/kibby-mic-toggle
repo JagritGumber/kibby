@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if (( $# != 0 )); then
+    printf 'usage: %s\n' "$0" >&2
+    exit 2
+fi
+
+wpctl_bin=${WPCTL_BIN:-wpctl}
+caelestia_bin=${CAELESTIA_BIN:-caelestia}
+source_ref=@DEFAULT_AUDIO_SOURCE@
+
+"$wpctl_bin" set-mute "$source_ref" toggle
+volume_state=$("$wpctl_bin" get-volume "$source_ref")
+
+if [[ "$volume_state" == *"[MUTED]"* ]]; then
+    "$caelestia_bin" shell toaster info \
+        "Microphone muted" "Your microphone is off" mic_off || true
+else
+    "$caelestia_bin" shell toaster success \
+        "Microphone unmuted" "Your microphone is on" mic || true
+fi

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 2,
+  "id": "appimage-icons",
+  "name": "AppImage icons",
+  "version": "0.1.0",
+  "kind": "component",
+  "license": "GPL-3.0-or-later",
+  "description": "Gives AppImages with a broken icon link their real icon in Dolphin, rerun by a user path unit whenever ~/Applications changes.",
+  "dependencies": [],
+  "services": [
+    {
+      "unit": "appimage-thumbnails.path",
+      "wantedBy": "default.target"
+    }
+  ],
+  "system": {
+    "pacman": [
+      "python",
+      "python-pillow",
+      "librsvg",
+      "imagemagick",
+      "kio-extras"
+    ],
+    "aur": []
+  }
+}

@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Remember Helium across suspend, then either repair the singleton
+# or restart one instance. Resume from sleep often kills the GPU
+# process; leftover launches then open the same profile and show
+# "Something went wrong when opening your profile".
+set -euo pipefail
+
+MARKER="${XDG_RUNTIME_DIR:-/tmp}/helium-was-running"
+REPAIR="${HOME}/.local/bin/helium-repair-singleton"
+OPEN="${HOME}/.local/bin/helium-open"
+HELIUM_BIN=/opt/helium-browser-bin/helium
+
+helium_alive() {
+    pgrep -x helium >/dev/null
+}
+
+gpu_alive() {
+    pgrep -f -- "$HELIUM_BIN --type=gpu-process" >/dev/null
+}
+
+case "${1:-}" in
+    before)
+        if helium_alive; then
+            : >"$MARKER"
+        else
+            rm -f "$MARKER"
+        fi
+        ;;
+    after)
+        [[ -e "$MARKER" ]] || exit 0
+        rm -f "$MARKER"
+
+        # DRM/Wayland come back a moment after the resume event.
+        sleep 2
+
+        if helium_alive && gpu_alive; then
+            "$HOME"/.local/bin/helium-collapse-extras || true
+            "$REPAIR" || true
+            exit 0
+        fi
+
+        pkill -x helium || true
+        sleep 0.4
+        exec "$OPEN"
+        ;;
+    *)
+        printf 'usage: %s before|after\n' "$0" >&2
+        exit 2
+        ;;
+esac

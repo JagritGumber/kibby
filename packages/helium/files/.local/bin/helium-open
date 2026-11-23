@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+"$HOME"/.local/bin/helium-collapse-extras || true
+"$HOME"/.local/bin/helium-repair-singleton || true
+exec /usr/bin/helium-browser "$@"

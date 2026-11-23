@@ -1,0 +1,103 @@
+#!/bin/sh
+set -eu
+
+unit="caelestia-recorder-keepalive.service"
+
+recorder_running() {
+    pidof gpu-screen-recorder >/dev/null 2>&1
+}
+
+case "${1:-}" in
+    start)
+        shift
+
+        if recorder_running; then
+            exit 0
+        fi
+
+        systemctl --user stop "$unit" >/dev/null 2>&1 || true
+        systemctl --user reset-failed "$unit" >/dev/null 2>&1 || true
+
+        systemd-run \
+            --user \
+            --quiet \
+            --collect \
+            --unit="${unit%.service}" \
+            --property=Type=oneshot \
+            --property=RemainAfterExit=yes \
+            --property=KillMode=process \
+            /usr/bin/caelestia record "$@"
+
+        attempts=0
+        while [ "$attempts" -lt 480 ]; do
+            if recorder_running; then
+                exit 0
+            fi
+
+            state="$(systemctl --user show "$unit" --property=ActiveState --value 2>/dev/null || true)"
+            case "$state" in
+                inactive|failed)
+                    exit 1
+                    ;;
+            esac
+
+            attempts=$((attempts + 1))
+            sleep 0.25
+        done
+
+        systemctl --user stop "$unit" >/dev/null 2>&1 || true
+        exit 1
+        ;;
+    stop)
+        status=0
+        if recorder_running; then
+            pids="$(pidof gpu-screen-recorder 2>/dev/null || true)"
+            for pid in $pids; do
+                kill -TERM "$pid" 2>/dev/null || true
+            done
+
+            attempts=0
+            while recorder_running && [ "$attempts" -lt 100 ]; do
+                attempts=$((attempts + 1))
+                sleep 0.1
+            done
+
+            if recorder_running; then
+                status=1
+            fi
+        fi
+
+        state_home="${XDG_STATE_HOME:-$HOME/.local/state}"
+        videos_dir="${XDG_VIDEOS_DIR:-$HOME/Videos}"
+        recordings_dir="${CAELESTIA_RECORDINGS_DIR:-$videos_dir/Recordings}"
+        recording_path="$state_home/caelestia/record/recording.mp4"
+
+        if [ "$status" -eq 0 ] && [ -f "$recording_path" ]; then
+            if ffprobe -v error "$recording_path" >/dev/null 2>&1; then
+                mkdir -p "$recordings_dir"
+                stamp="$(date '+%Y%m%d_%H-%M-%S')"
+                new_path="$recordings_dir/recording_$stamp.mp4"
+                if [ -e "$new_path" ]; then
+                    new_path="$recordings_dir/recording_${stamp}_$$.mp4"
+                fi
+                mv -- "$recording_path" "$new_path"
+                notify-send -a caelestia-cli "Recording stopped" "Recording saved in $new_path" >/dev/null 2>&1 || true
+                printf '%s\n' "$new_path"
+            else
+                status=1
+                notify-send -u critical -a caelestia-cli "Recording failed" "The temporary MP4 is invalid and was kept at $recording_path" >/dev/null 2>&1 || true
+            fi
+        fi
+
+        systemctl --user stop "$unit" >/dev/null 2>&1 || true
+        systemctl --user reset-failed "$unit" >/dev/null 2>&1 || true
+        exit "$status"
+        ;;
+    pause)
+        exec /usr/bin/caelestia record -p
+        ;;
+    *)
+        printf 'usage: %s {start [record-options...]|stop|pause}\n' "$0" >&2
+        exit 2
+        ;;
+esac

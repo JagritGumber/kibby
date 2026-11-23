@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 2,
+  "id": "helium",
+  "name": "Helium browser helpers",
+  "version": "0.1.0",
+  "kind": "component",
+  "license": "GPL-3.0-or-later",
+  "description": "Workarounds for the Helium browser: open through one instance, repair its singleton lock, and collapse extra windows around sleep. The sleep hook runs them when present.",
+  "dependencies": [],
+  "system": {
+    "pacman": [
+      "procps-ng"
+    ],
+    "aur": [
+      "helium-browser-bin"
+    ]
+  }
+}

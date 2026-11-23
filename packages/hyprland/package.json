@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 2,
+  "id": "hyprland",
+  "name": "Kibby Hyprland",
+  "version": "0.1.0",
+  "kind": "overlay",
+  "license": "GPL-3.0-or-later",
+  "description": "Hyprland in Lua: CachyOS's Hyprland template, fetched at a pinned commit, with Kibby's binds, monitor rule, host helpers and the Caelestia bridge loaded on top.",
+  "dependencies": [
+    "caelestia-shell",
+    "desktop-scripts"
+  ],
+  "settings": [
+    "KIBBY_BROWSER",
+    "KIBBY_MONITOR",
+    "KIBBY_MONITOR_SCALE",
+    "KIBBY_NUMLOCK_BY_DEFAULT",
+    "KIBBY_TOUCHPAD_DEVICE"
+  ],
+  "upstream": [
+    {
+      "name": "CachyOS/cachyos-hypr-noctalia",
+      "url": "https://github.com/CachyOS/cachyos-hypr-noctalia.git",
+      "commit": "baabb428fb59dab025190210d2e05a937a436f39",
+      "license": "none stated upstream: fetched from CachyOS at install time, never copied into Kibby",
+      "mode": "files",
+      "files": {
+        "etc/skel/.config/hypr/config/animations.lua": ".config/hypr/config/animations.lua",
+        "etc/skel/.config/hypr/config/colors.lua": ".config/hypr/config/colors.lua",
+        "etc/skel/.config/hypr/config/decorations.lua": ".config/hypr/config/decorations.lua",
+        "etc/skel/.config/hypr/config/variables.lua": ".config/hypr/config/variables.lua",
+        "etc/skel/.config/hypr/config/environment.lua": ".config/hypr/config/environment.lua",
+        "etc/skel/.config/hypr/config/inputs.lua": ".config/hypr/config/inputs.lua",
+        "etc/skel/.config/hypr/config/binds.lua": ".config/hypr/config/binds.lua",
+        "etc/skel/.config/hypr/config/misc.lua": ".config/hypr/config/misc.lua",
+        "etc/skel/.config/hypr/config/windowrules.lua": ".config/hypr/config/windowrules.lua",
+        "etc/skel/.config/hypr/config/workspaces.lua": ".config/hypr/config/workspaces.lua",
+        "etc/skel/.config/hypr/xdph.conf": ".config/hypr/xdph.conf"
+      }
+    }
+  ],
+  "hyprland": [
+    "kibby.overrides",
+    "kibby.host",
+    "kibby.caelestia"
+  ],
+  "services": [
+    {
+      "unit": "hypridle.service",
+      "wantedBy": "graphical-session.target",
+      "provided": "/usr/lib/systemd/user/hypridle.service"
+    },
+    {
+      "unit": "hyprpolkitagent.service",
+      "wantedBy": "graphical-session.target",
+      "provided": "/usr/lib/systemd/user/hyprpolkitagent.service"
+    }
+  ],
+  "system": {
+    "pacman": [
+      "hyprland",
+      "hypridle",
+      "hyprlock",
+      "hyprpicker",
+      "hyprpolkitagent",
+      "uwsm",
+      "xdg-desktop-portal-hyprland",
+      "kitty",
+      "dolphin",
+      "gnome-text-editor",
+      "gnome-calculator",
+      "plasma-systemmonitor",
+      "wireplumber",
+      "git",
+      "python"
+    ],
+    "aur": [],
+    "pins": {
+      "hyprland": "0.57"
+    }
+  }
+}
