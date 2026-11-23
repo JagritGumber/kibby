@@ -32,9 +32,12 @@ Item {
             Canvas {
                 id: canvas
                 anchors.fill: parent
-                // Keep full-screen canvas work away from the GUI thread. The
-                // desktop can otherwise remain smooth while this surface steps.
-                renderStrategy: Canvas.Threaded
+                // Paint each frame in step with it. Canvas.Threaded queued
+                // every requestPaint() behind its slow full-screen paints, so
+                // the glow fell seconds behind the voice (5 s after 10 s of
+                // speech). This host is its own process, so blocking its
+                // thread for a paint costs nothing else.
+                renderStrategy: Canvas.Immediate
                 property real elapsed: 0
                 property real smoothSpeechLevel: 0
                 property real smoothAudioLevel: 0
@@ -134,9 +137,9 @@ Item {
                         weight += amplitude;
                     }
                     // smoothSpectrum() pads silence to zeros, so a quiet mic never
-                    // reaches the empty case above. Keep the idle flow until the
-                    // voice is loud enough to drive the waves on its own.
-                    const voice = Math.min(1, weight / 1.5);
+                    // reaches the empty case above. Keep the idle flow only until
+                    // the voice drives the waves; even a soft word should win.
+                    const voice = Math.min(1, weight / 0.75);
                     return idle * (1 - voice) + wave / Math.max(1.5, weight);
                 }
 
@@ -219,8 +222,10 @@ Item {
                     const failed = root.runtime.speechState === "error" || root.runtime.speechState === "cancelled";
                     const intensity = Number(root.settings.intensity || 1);
                     const audioEnergy = Math.max(0, smoothAudioLevel) * intensity;
+                    // A quiet baseline and a steep rise, so each word visibly
+                    // swells the glow and the pauses between words settle it.
                     const speechEnergy = speechActive
-                        ? (0.65 + smoothSpeechLevel * 0.75) * intensity : 0;
+                        ? (0.45 + smoothSpeechLevel * 1.05) * intensity : 0;
                     drawEdgeGlow(ctx, Math.max(audioEnergy * 0.42, speechEnergy), failed);
                     const geo = geometry();
                     if (audioEnergy > 0.015) {

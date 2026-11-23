@@ -24,6 +24,14 @@ jobs:
           python3 -m py_compile install
           grep -rlE '^#!.*\b(ba)?sh\b' packages | while read -r f; do bash -n "$f"; done
 
+      - name: wispr-glow cava range matches
+        run: |
+          dir=packages/wispr-glow/files/.config/quickshell/wispr-glow
+          conf=$(sed -n 's/^ascii_max_range *= *\([0-9][0-9]*\).*/\1/p' "$dir/cava-microphone.conf")
+          qml=$(sed -n 's/.*readonly property int cavaRange: *\([0-9][0-9]*\).*/\1/p' "$dir/WisprActivity.qml")
+          echo "cava ascii_max_range=$conf, WisprActivity cavaRange=$qml"
+          test -n "$conf" && test "$conf" = "$qml"
+
       - name: List and dependencies
         run: |
           ./install --list

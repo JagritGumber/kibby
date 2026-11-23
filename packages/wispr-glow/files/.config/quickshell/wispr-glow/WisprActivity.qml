@@ -20,7 +20,9 @@ Item {
     property var settings: ({
         logPath: "~/.config/Wispr Flow/logs/main.log",
         micReadyTimeoutMs: 1600,
-        // KIBBY_WISPR_INPUT_GAIN in ~/.config/kibby/settings.env (mic levels differ per person).
+        // KIBBY_WISPR_INPUT_GAIN in ~/.config/kibby/settings.env.
+        // 0 = automatic gain (see scaleLevels). A number (Jagrit's EPOS
+        // headset used 12) applies that fixed linear gain instead.
         inputGain: {{KIBBY_WISPR_INPUT_GAIN}}
     })
     property string liveState: "idle"
@@ -29,6 +31,14 @@ Item {
     property real audioLevel: 0
     property var spectrum: []
     property int generation: 0
+    // Automatic gain, reset for each dictation: the mic's noise floor and the
+    // loudest recent level, as shares of cava's range.
+    property real noiseLevel: 0.0005
+    property real peakLevel: 0
+    property real levelsAt: 0
+    // ascii_max_range in cava-microphone.conf. 1000 rounded soft words to 2-5.
+    // The two must match; Kibby's CI checks that they do.
+    readonly property int cavaRange: 10000
     // The last error shown, so Wispr's repeats (it sends NoAudio up to three
     // times in a few seconds) make one notification.
     property string lastNotice: ""
@@ -120,6 +130,32 @@ Item {
         Quickshell.execDetached(["notify-send", "-a", "Wispr Flow", "-i", "wispr-flow", "Wispr Flow", message]);
     }
 
+    // cava's levels (0-1 of its range) to the glow's 0-1 on a decibel scale:
+    // 0 just above the mic's own noise, 1 at the loudest sound of the last
+    // second or two. Speech spans 30-40 dB, so a linear scale left soft words
+    // near 0 next to a loud one; in decibels every word moves the glow, on any
+    // mic, while silence stays at 0.
+    function scaleLevels(levels) {
+        const fixedGain = Number(settings.inputGain) || 0;
+        if (fixedGain > 0)
+            return levels.map(level => Math.max(0, Math.min(1, level * fixedGain)));
+        const now = Date.now();
+        const seconds = levelsAt > 0 ? Math.min(0.25, (now - levelsAt) / 1000) : 0;
+        levelsAt = now;
+        const loudest = Math.max(...levels);
+        // The noise floor drops to any quieter moment at once and creeps up
+        // 3 dB a second, so the pauses between words keep it honest.
+        noiseLevel = Math.max(0.0001, loudest < noiseLevel
+            ? loudest : noiseLevel * Math.pow(10, 3 * seconds / 20));
+        peakLevel = Math.max(loudest, peakLevel * Math.exp(-seconds / 1.5));
+        // KIBBY_WISPR_GATE_DB: how far above the noise floor a sound starts
+        // to move the glow. Lower it for quiet mics, raise it for noisy ones.
+        const gate = noiseLevel * Math.pow(10, {{KIBBY_WISPR_GATE_DB}} / 20);
+        const top = Math.max(peakLevel, gate * Math.pow(10, 24 / 20));
+        const span = Math.log(top / gate);
+        return levels.map(level => level <= gate ? 0 : Math.min(1, Math.log(level / gate) / span));
+    }
+
     function consumeLogLine(line) {
         // A key press alone is never evidence that Wispr started recording.
         const notice = line.match(/Sending notification ([A-Za-z]+)/);
@@ -127,6 +163,10 @@ Item {
             fail(errorNotices[notice[1]]);
         } else if (line.includes("AudioStart IPC startListening")) {
             generation += 1;
+            // Each dictation finds its own levels.
+            noiseLevel = 0.0005;
+            peakLevel = 0;
+            levelsAt = 0;
             setState("arming", "");
             micReadyTimeout.restart();
         } else if (line.includes("mic ready event: false")) {
@@ -194,13 +234,11 @@ Item {
         command: ["bash", root.packageRoot + "/microphone-level.sh", root.packageRoot + "/cava-microphone.conf"]
         stdout: SplitParser {
             onRead: data => {
-                const values = data.split(";").map(value => Number(value.trim()))
-                    .filter(value => !isNaN(value));
-                if (values.length === 0)
+                const levels = data.split(";").map(value => Number(value.trim()))
+                    .filter(value => !isNaN(value)).map(value => value / root.cavaRange);
+                if (levels.length === 0)
                     return;
-                const inputGain = Number(root.settings.inputGain || 12);
-                root.spectrum = values.map(value => Math.max(0,
-                    Math.min(1, value / 1000 * inputGain)));
+                root.spectrum = root.scaleLevels(levels);
                 root.audioLevel = Math.max(...root.spectrum);
                 root.publish();
             }

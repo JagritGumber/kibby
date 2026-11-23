@@ -32,6 +32,7 @@ PACKAGES = REPO / "packages"
 DEFAULTS = REPO / "settings.default.env"
 PLACEHOLDER = re.compile(r"\{\{(HOME|KIBBY_[A-Z0-9_]+)\}\}")
 SETTING_NAME = re.compile(r"KIBBY_[A-Z0-9_]+")
+NUMBER = re.compile(r"-?[0-9]+(\.[0-9]+)?")
 
 
 def die(message):
@@ -63,6 +64,9 @@ def check_settings(settings, defaults):
             die(f"{key} contains a quote, backslash or {{{{ }}}}; plain values only")
         if defaults.get(key) in ("true", "false") and value not in ("true", "false"):
             die(f"{key} must be true or false, not {value!r}")
+        # Numbers land unquoted in QML and config files.
+        if NUMBER.fullmatch(defaults.get(key, "")) and not NUMBER.fullmatch(value):
+            die(f"{key} must be a number, not {value!r}")
 
 
 def load_packages():

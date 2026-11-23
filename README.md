@@ -14,7 +14,7 @@ It runs on Arch Linux and CachyOS, with Hyprland 0.57 or newer (the Lua config).
 | `theme-sync` | Runs once at install and after every wallpaper change. It sets Dolphin's Material style and the caelestia-folders icons, and recolours KDE/Qt apps, GTK apps and the Papirus folders from the wallpaper's palette. |
 | `material-dolphin` | A Qt style plugin over Darkly. It gives Dolphin and the KDE file dialog Caelestia's Material look. Built from source. |
 | `tray-standin` | A kded module, so the system tray works without Plasma. Built from source. |
-| `wispr-glow` | While you dictate with Wispr Flow, the screen edges glow in the wallpaper's colours and ripple with your voice. Errors turn the glow red. Wispr's own bar stays hidden. |
+| `wispr-glow` | While you dictate with Wispr Flow, the screen edges glow in the wallpaper's colours and ripple with your voice. Errors turn the glow red. Wispr's own bar stays hidden. The glow sets its own gain from your mic (`KIBBY_WISPR_INPUT_GAIN=0`). If soft words barely move it, lower `KIBBY_WISPR_GATE_DB` from 14 (10 suits a quiet headset); if it moves while you are silent, raise it. |
 | `desktop-scripts` | The helpers the binds call: mic mute, touchpad state, screen OCR, the recorder, the sleep hook, and clipboard history. |
 | `mic-mute-led` | Keeps a laptop's mic-mute LED in step with PipeWire. |
 | `appimage-icons` | Shows each AppImage's real icon in Dolphin. |
@@ -67,7 +67,7 @@ Dolphin gets two things from Kibby:
 - numlock
 - touchpad device
 - mic-mute LED
-- Wispr mic gain
+- Wispr mic gain and gate
 - keyd device IDs
 
 `settings.default.env` documents each setting. `examples/vivobook-15.env` holds the values of the machine Kibby was made on.
