@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Switch the look of the Wispr glow's bottom bars, live (the glow watches the
+# file this writes, so nothing restarts):
+#   kurve      rounded bars rising from the bottom edge, like the Kurve Plasma widget,
+#              in his Kurve colour list (Catppuccin accents) left to right
+#              (the default)
+#   wallpaper  the same bars in the wallpaper's primary, secondary, tertiary
+#   rainbow    the same bars in Kurve's "Hue" colours, a full rainbow
+#   caelestia  bars rising from the edge with rounded tops, like Caelestia's
+#              desktop visualiser
+# With no argument, prints the current look. Before the first switch the look
+# is KIBBY_WISPR_BAR_STYLE from ~/.config/kibby/settings.env.
+set -euo pipefail
+file="${XDG_STATE_HOME:-$HOME/.local/state}/wispr-glow/bar-style"
+case "${1:-}" in
+    kurve|wallpaper|rainbow|caelestia)
+        mkdir -p "${file%/*}"
+        printf '%s\n' "$1" > "$file"
+        echo "Wispr glow bars: $1"
+        ;;
+    "")
+        cat "$file" 2>/dev/null || echo {{KIBBY_WISPR_BAR_STYLE}}
+        ;;
+    *)
+        echo "usage: wispr-glow-style [kurve|wallpaper|rainbow|caelestia]" >&2
+        exit 2
+        ;;
+esac

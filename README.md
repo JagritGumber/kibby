@@ -14,7 +14,7 @@ It runs on Arch Linux and CachyOS, with Hyprland 0.57 or newer (the Lua config).
 | `theme-sync` | Runs once at install and after every wallpaper change. It sets Dolphin's Material style and the caelestia-folders icons, and recolours KDE/Qt apps, GTK apps and the Papirus folders from the wallpaper's palette. |
 | `material-dolphin` | A Qt style plugin over Darkly. It gives Dolphin and the KDE file dialog Caelestia's Material look. Built from source. |
 | `tray-standin` | A kded module, so the system tray works without Plasma. Built from source. |
-| `wispr-glow` | While you dictate with Wispr Flow, the screen edges glow in the wallpaper's colours and ripple with your voice. Errors turn the glow red. Wispr's own bar stays hidden. The glow sets its own gain from your mic (`KIBBY_WISPR_INPUT_GAIN=0`). If soft words barely move it, lower `KIBBY_WISPR_GATE_DB` from 14 (10 suits a quiet headset); if it moves while you are silent, raise it. |
+| `wispr-glow` | While you dictate with Wispr Flow, the screen edges glow in the wallpaper's colours and ripple with your voice, and bars along the bottom edge move with each word. Errors turn the glow red. Wispr's own bar stays hidden. See [Wispr glow](#wispr-glow) below. |
 | `desktop-scripts` | The helpers the binds call: mic mute, touchpad state, screen OCR, the recorder, the sleep hook, and clipboard history. |
 | `mic-mute-led` | Keeps a laptop's mic-mute LED in step with PipeWire. |
 | `appimage-icons` | Shows each AppImage's real icon in Dolphin. |
@@ -59,6 +59,21 @@ Dolphin gets two things from Kibby:
 
 **At every wallpaper change:** Caelestia runs the same script after it makes the new colours. The script recolours KDE and GTK apps and the folder icons, and running apps reload them. So the folders stay Papirus blue only until you first pick a wallpaper; the installer's next steps say so.
 
+## Wispr glow
+
+The glow is drawn on the GPU: the edge gradients and the voice ribbons are shaders, and so are the bottom bars.
+
+- **The bars' look.** `wispr-glow-style` switches it live, with nothing restarted:
+  - `kurve` (the default) is rounded bars in the colours of the Kurve Plasma widget.
+  - `rainbow` uses Kurve's full-hue colours.
+  - `wallpaper` uses the wallpaper's own colours.
+  - `caelestia` looks like Caelestia's desktop visualiser.
+
+  `wispr-glow-style` with no argument prints the current look. Until the first switch, the look is `KIBBY_WISPR_BAR_STYLE`. The switch is saved in `$XDG_STATE_HOME/wispr-glow/bar-style`, a folder the installer creates.
+- **The bars themselves.** `KIBBY_WISPR_BARS` turns them on or off. `KIBBY_WISPR_BAR_COUNT` sets how many go across the screen (0 means the look's own count), and `KIBBY_WISPR_BAR_MAX_HEIGHT` sets their height at full voice.
+- **The voice.** `KIBBY_WISPR_INPUT_GAIN=0` sets the gain automatically from your mic. If soft words barely move the glow, lower `KIBBY_WISPR_GATE_DB` from 14 (10 suits a quiet headset); if it moves while you are silent, raise it.
+- **The shaders.** At install, Kibby builds each shader with your system's `qsb` (from `qt6-shadertools`), so they match your Qt. Without `qsb`, it uses the packs shipped in `packages/wispr-glow/prebuilt`, built with Qt 6.12.0. Those may not load on an older Qt, and the installer's next steps say so.
+
 ## Settings
 
 `~/.config/kibby/settings.env` holds everything that differs per machine or person:
@@ -67,7 +82,7 @@ Dolphin gets two things from Kibby:
 - numlock
 - touchpad device
 - mic-mute LED
-- Wispr mic gain and gate
+- the Wispr glow: mic gain and gate, and the bottom bars
 - keyd device IDs
 
 `settings.default.env` documents each setting. `examples/vivobook-15.env` holds the values of the machine Kibby was made on.
@@ -91,6 +106,7 @@ examples/                  settings for real machines
 packages/<id>/package.json the manifest (schemaVersion 2, below)
 packages/<id>/files/       files that land in $HOME, at the same relative paths
 packages/<id>/system/      files for / (rendered, then copied with sudo)
+packages/<id>/prebuilt/    fallbacks used when a build tool is missing (wispr-glow's shader packs)
 ```
 
 `package.json` keeps the old Kibby manifest (`id`, `name`, `version`, `kind`, `license`, `dependencies`, `settings`) and adds these fields:
@@ -105,6 +121,9 @@ packages/<id>/system/      files for / (rendered, then copied with sudo)
 | `notes` | Instructions printed after install |
 | `postInstall` | Commands run once everything is in place. A command whose tools are missing becomes a next step, and so do lines it prints that start with `next: ` |
 | `seed` | Files a program rewrites itself (Caelestia, on every colour change): written only when they do not exist yet |
+| `choices` | Allowed values for a setting; anything else is refused before install |
+| `stateDirs` | Folders created under `$XDG_STATE_HOME` |
+| `shaders` | Shader sources built into `.qsb` packs with the system `qsb`, or else taken from the package's prebuilt packs |
 | `system` | pacman and AUR packages, and version pins |
 
 ## History

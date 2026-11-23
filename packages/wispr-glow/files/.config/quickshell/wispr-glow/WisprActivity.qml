@@ -30,6 +30,9 @@ Item {
     property bool rightCtrlDown: false
     property real audioLevel: 0
     property var spectrum: []
+    // cava's 48 narrow bands after the auto-gain, for the bottom lines; the
+    // glow reads 12 wide ones (spectrum).
+    property var bands: []
     property int generation: 0
     // Automatic gain, reset for each dictation: the mic's noise floor and the
     // loudest recent level, as shares of cava's range.
@@ -94,6 +97,7 @@ Item {
             state: liveState,
             level: audioLevel,
             spectrum: spectrum,
+            bands: bands,
             error: errorMessage
         });
     }
@@ -105,6 +109,7 @@ Item {
         if (nextState === "idle") {
             audioLevel = 0;
             spectrum = [];
+            bands = [];
             errorMessage = "";
         }
         publish();
@@ -234,11 +239,18 @@ Item {
         command: ["bash", root.packageRoot + "/microphone-level.sh", root.packageRoot + "/cava-microphone.conf"]
         stdout: SplitParser {
             onRead: data => {
-                const levels = data.split(";").map(value => Number(value.trim()))
-                    .filter(value => !isNaN(value)).map(value => value / root.cavaRange);
+                const levels = data.split(";").filter(value => value.trim().length > 0)
+                    .map(value => Number(value)).filter(value => !isNaN(value))
+                    .map(value => value / root.cavaRange);
                 if (levels.length === 0)
                     return;
-                root.spectrum = root.scaleLevels(levels);
+                root.bands = root.scaleLevels(levels);
+                // The glow's 12 wide bands: the loudest of each group.
+                const group = Math.max(1, Math.round(root.bands.length / 12));
+                const spectrum = [];
+                for (let start = 0; start < root.bands.length; start += group)
+                    spectrum.push(Math.max(...root.bands.slice(start, start + group)));
+                root.spectrum = spectrum;
                 root.audioLevel = Math.max(...root.spectrum);
                 root.publish();
             }
