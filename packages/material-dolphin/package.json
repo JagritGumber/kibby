@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 2,
+  "id": "material-dolphin",
+  "name": "Material Dolphin",
+  "version": "0.1.0",
+  "kind": "component",
+  "license": "GPL-3.0-or-later",
+  "description": "A Qt style plugin layered over Darkly that repaints Dolphin and the KDE file dialog in Caelestia's Material shapes, with Dolphin's settings and toolbar layout. Built from source into ~/.local.",
+  "dependencies": [
+    "theme-sync"
+  ],
+  "build": [
+    "cmake -S ~/.local/src/caelestia-qtstyle -B ~/.local/src/caelestia-qtstyle/build -DCMAKE_INSTALL_PREFIX=\"$HOME/.local\"",
+    "cmake --build ~/.local/src/caelestia-qtstyle/build",
+    "cmake --install ~/.local/src/caelestia-qtstyle/build"
+  ],
+  "system": {
+    "pacman": [
+      "dolphin",
+      "kxmlgui",
+      "qt6-base",
+      "cmake",
+      "extra-cmake-modules",
+      "gcc"
+    ],
+    "aur": [
+      "darkly-bin"
+    ]
+  }
+}

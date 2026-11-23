@@ -1,35 +1,98 @@
 # Kibby
 
-Kibby is a source-owning component system for existing Hyprland desktops. It
-layers a small recovery foundation onto the user's current configuration, then
-copies optional component source into the XDG paths where it actually runs.
+Kibby is Jagrit's Linux desktop: Hyprland and the [Caelestia](https://github.com/caelestia-dots/shell) Quickshell shell, with his own pieces spliced in, as packages that anyone can install.
 
-Kibby is not a distribution, a replacement Hyprland configuration, or a shell
-theme bundle. It is closer to shadcn: inspect the plan, add only what you want,
-and keep the resulting source.
+It runs on Arch Linux and CachyOS, with Hyprland 0.57 or newer (the Lua config).
 
-Kibby was directly inspired by end-4's
-[illogical-impulse](https://github.com/end-4/dots-hyprland). It takes selected
-foundational design and implementation references from that project while
-reworking the experience around independently installable, user-owned modules.
-Kibby is an independent project and is not an official illogical-impulse
-distribution.
+## Packages
 
-## Foundation workflow
+| Package | What it does |
+| --- | --- |
+| `hyprland` | Hyprland in Lua. The base is CachyOS's Hyprland template, fetched at a pinned commit. On top of it: number keys go to workspaces, a scratchpad toggle, the monitor rule from settings, the touchpad key, an empty wallpaper workspace, and the Caelestia bridge (launcher, sidebar, lock, OSD keys, OCR and translate, the colour picker). |
+| `caelestia-shell` | Caelestia from Kibby's fork, [JagritGumber/caelestia-shell](https://github.com/JagritGumber/caelestia-shell): upstream v2.5.0 plus touchpad-lock and mic-mute feedback, each window's own app icon in the bar, tray fixes, system alerts, the profile picture cropper, and notification, lock, launcher and recorder changes. |
+| `caelestia-config` | Caelestia's `shell.json` and `cli.json`, and the Dolphin stylesheet template. |
+| `theme-sync` | Runs after every wallpaper change. It recolours KDE/Qt apps, GTK apps and the Papirus folders from the wallpaper's palette. |
+| `material-dolphin` | A Qt style plugin over Darkly. It gives Dolphin and the KDE file dialog Caelestia's Material look. Built from source. |
+| `tray-standin` | A kded module, so the system tray works without Plasma. Built from source. |
+| `wispr-glow` | While you dictate with Wispr Flow, the screen edges glow in the wallpaper's colours and ripple with your voice. Errors turn the glow red. Wispr's own bar stays hidden. |
+| `desktop-scripts` | The helpers the binds call: mic mute, touchpad state, screen OCR, the recorder, the sleep hook, and clipboard history. |
+| `mic-mute-led` | Keeps a laptop's mic-mute LED in step with PipeWire. |
+| `appimage-icons` | Shows each AppImage's real icon in Dolphin. |
+| `helium` | Workarounds for the Helium browser around sleep. |
+| `terminal` | kitty, Alacritty, fish, fuzzel, Helix and micro settings. |
+| `session` | The uwsm environment and the portal choices. |
+| `keyd` | One Caps Lock across all keyboards, and mouse side buttons that switch workspaces. These are system files: Kibby prints the `sudo` commands. |
 
-```bash
-kibby init --dry-run
-kibby init
-kibby doctor
+`./install --list` shows the packages with their versions.
+
+## Install
+
+```sh
+git clone https://github.com/JagritGumber/kibby ~/kibby && cd ~/kibby
+./install --deps                 # the pacman and AUR packages to install first
+cp settings.default.env ~/my-kibby.env && $EDITOR ~/my-kibby.env
+./install --settings ~/my-kibby.env --dry-run
+./install --settings ~/my-kibby.env
 ```
 
-`kibby init` installs a Quickshell-independent recovery layer with direct
-terminal, launcher, lock, audio, brightness, and screenshot bindings. Existing
-monitor, workspace, animation, input, window-rule, and theme configuration stays
-owned by the host desktop.
+Then follow the "Next steps" the installer prints: reload systemd, run the `sudo` commands for keyd, and build the two plugins. Log out and back in to start the session.
 
-Arch Linux and CachyOS are the first tested package adapters. Missing official
-packages are previewed and require confirmation. Kibby never removes packages,
-builds AUR packages, or replaces theme packages.
+- Everything is written below `$HOME`.
+- Each file the install would replace is first copied to `~/.local/state/kibby/backups/<time>/`.
+- The installer never uses `sudo` and never runs `systemctl`.
+- To install only some packages, name them: `./install wispr-glow`. Their dependencies come along.
 
-See `docs/architecture.md` and `docs/foundation.md` for the safety model.
+## Settings
+
+`~/.config/kibby/settings.env` holds everything that differs per machine or person:
+- browser
+- monitor and scale
+- numlock
+- touchpad device
+- mic-mute LED
+- Wispr mic gain
+- keyd device IDs
+
+`settings.default.env` documents each setting. `examples/vivobook-15.env` holds the values of the machine Kibby was made on.
+
+Package files use `{{HOME}}` and `{{KIBBY_*}}` placeholders, which the installer fills in. Scripts and units also read the settings file directly. To change a setting, edit the file and run `./install` again.
+
+## Upstream code
+
+Kibby copies no upstream wholesale:
+
+- **Caelestia shell** (GPL-3.0). Kibby's changes live in a fork, [JagritGumber/caelestia-shell](https://github.com/JagritGumber/caelestia-shell). Its `kibby` branch is upstream `v2.5.0` with one commit per change, and `KIBBY.md` there lists them. The installer checks out the fork at a pinned commit into `~/.config/quickshell/caelestia`.
+- **CachyOS Hyprland template** (`cachyos-hypr-noctalia`). It states no licence, so Kibby does not include it. The installer fetches it from CachyOS at a pinned commit into `~/.config/hypr/config/`. Kibby's own Lua in `~/.config/hypr/kibby/` loads after it.
+- The shell's compiled plugin, `caelestia-cli`, Quickshell and Darkly come from the AUR. `./install --deps` lists the versions this setup was made with: `caelestia-shell` 2.5.0 and `caelestia-cli` 1.1.2.
+
+## Layout
+
+```text
+install                    the installer (Python 3, standard library only)
+settings.default.env       every setting, with defaults
+examples/                  settings for real machines
+packages/<id>/package.json the manifest (schemaVersion 2, below)
+packages/<id>/files/       files that land in $HOME, at the same relative paths
+packages/<id>/system/      files for / (rendered, then copied with sudo)
+```
+
+`package.json` keeps the old Kibby manifest (`id`, `name`, `version`, `kind`, `license`, `dependencies`, `settings`) and adds these fields:
+
+| Field | What it lists |
+| --- | --- |
+| `upstream` | Code fetched at a pinned commit, as files or as a whole checkout |
+| `hyprland` | Lua modules that `kibby/init.lua` loads |
+| `services` | User units to enable |
+| `systemFiles` | Files for `/` |
+| `build` | Build commands |
+| `notes` | Instructions printed after install |
+| `system` | pacman and AUR packages, and version pins |
+
+## History
+
+- Kibby began in August 2026 as a Rust tool in this repository that copied optional Hyprland components into place (the first commit, dc0eaac). The old runtime packages (`wispr-glow` 0.1.3 and its parts) came from it.
+- In November 2026 the desktop it grew into became the dots themselves: the packages above and a small installer.
+
+## Credits
+
+See [NOTICE.md](NOTICE.md). Kibby is GPL-3.0, the same as Caelestia.

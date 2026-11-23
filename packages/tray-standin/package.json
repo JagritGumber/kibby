@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 2,
+  "id": "tray-standin",
+  "name": "Tray stand-in",
+  "version": "0.1.0",
+  "kind": "component",
+  "license": "GPL-3.0-or-later",
+  "description": "A small kded module that owns the StatusNotifierWatcher, so the shell's system tray works without Plasma. Built from source into ~/.local.",
+  "dependencies": [],
+  "build": [
+    "cmake -S ~/.local/src/kded-tray-standin -B ~/.local/src/kded-tray-standin/build",
+    "cmake --build ~/.local/src/kded-tray-standin/build",
+    "cmake --install ~/.local/src/kded-tray-standin/build"
+  ],
+  "system": {
+    "pacman": [
+      "kded",
+      "kcoreaddons",
+      "kdbusaddons",
+      "qt6-base",
+      "cmake",
+      "extra-cmake-modules",
+      "gcc"
+    ],
+    "aur": []
+  }
+}

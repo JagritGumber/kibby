@@ -1,0 +1,36 @@
+#!{{HOME}}/.local/share/uv/tools/rapidocr/bin/python
+
+import sys
+from pathlib import Path
+
+from rapidocr import RapidOCR
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print(f"Usage: {Path(sys.argv[0]).name} IMAGE", file=sys.stderr)
+        return 2
+
+    image = Path(sys.argv[1])
+    if not image.is_file():
+        print(f"Image not found: {image}", file=sys.stderr)
+        return 1
+
+    engine = RapidOCR(
+        params={
+            "Global.log_level": "ERROR",
+            "Rec.lang_type": "ch",
+        }
+    )
+    result = engine(str(image))
+    lines = getattr(result, "txts", None) or ()
+    text = "\n".join(line.strip() for line in lines if line and line.strip())
+    if not text:
+        return 1
+
+    print(text)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

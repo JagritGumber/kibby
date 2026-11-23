@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 2,
+  "id": "theme-sync",
+  "name": "Wallpaper theme sync",
+  "version": "0.1.0",
+  "kind": "component",
+  "license": "GPL-3.0-or-later",
+  "description": "After every wallpaper change (Caelestia's postHook), writes the KDE colour scheme, GTK colours and a recoloured Papirus folder theme from the wallpaper's palette, and tells running apps to reload. Includes the Qt, GTK and xsettingsd settings that point at it.",
+  "dependencies": [],
+  "system": {
+    "pacman": [
+      "kconfig",
+      "kservice",
+      "plasma-workspace",
+      "gtk-update-icon-cache",
+      "glib2",
+      "dbus",
+      "papirus-icon-theme",
+      "adw-gtk-theme",
+      "breeze-icons",
+      "xsettingsd",
+      "qt6ct",
+      "python"
+    ],
+    "aur": [
+      "darkly-bin",
+      "caelestia-cli"
+    ]
+  }
+}

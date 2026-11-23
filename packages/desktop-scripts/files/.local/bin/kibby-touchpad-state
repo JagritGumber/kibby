@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+state=${1:-}
+mode=${2:-}
+
+if [[ "$state" != enabled && "$state" != disabled ]]; then
+    printf 'usage: %s enabled|disabled [--quiet]\n' "$0" >&2
+    exit 2
+fi
+
+if [[ -n "$mode" && "$mode" != --quiet ]] || (( $# > 2 )); then
+    printf 'usage: %s enabled|disabled [--quiet]\n' "$0" >&2
+    exit 2
+fi
+
+runtime_dir=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+state_dir="$runtime_dir/kibby"
+state_path="$state_dir/touchpad-state"
+
+install -d -m 0700 "$state_dir"
+temporary=$(mktemp "$state_dir/.touchpad-state.XXXXXX")
+trap 'rm -f -- "$temporary"' EXIT
+printf '%s\n' "$state" > "$temporary"
+chmod 0600 "$temporary"
+mv -f -- "$temporary" "$state_path"
+trap - EXIT
+
+if [[ "$mode" == --quiet ]]; then
+    exit 0
+fi
+
+caelestia_bin=${CAELESTIA_BIN:-caelestia}
+if [[ "$state" == disabled ]]; then
+    "$caelestia_bin" shell toaster info \
+        "Touchpad locked" "The built-in touchpad is disabled" mouse
+else
+    "$caelestia_bin" shell toaster success \
+        "Touchpad unlocked" "The built-in touchpad is enabled" mouse
+fi

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 2,
+  "id": "caelestia-config",
+  "name": "Caelestia settings",
+  "version": "0.1.0",
+  "kind": "config",
+  "license": "GPL-3.0-or-later",
+  "description": "Caelestia's shell.json and cli.json: compact bar, three workspaces, tray, 170% volume, toasts, Qt and fuzzel theming with Kibby's theme sync as the post-wallpaper hook, and the Dolphin stylesheet template.",
+  "dependencies": [
+    "caelestia-shell",
+    "theme-sync"
+  ],
+  "system": {
+    "pacman": [
+      "alacritty",
+      "dolphin",
+      "fuzzel"
+    ],
+    "aur": [
+      "pwvucontrol"
+    ]
+  }
+}

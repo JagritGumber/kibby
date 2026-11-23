@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 2,
+  "id": "wispr-glow",
+  "name": "Wispr Flow glow",
+  "version": "0.2.0",
+  "kind": "component",
+  "license": "GPL-3.0-or-later",
+  "description": "While you dictate with Wispr Flow, the screen edges glow in the wallpaper's colours and ripple with your voice, with an idle wave when the mic is quiet; errors turn the glow red and arrive as notifications. Wispr's own bottom bar stays hidden. Successor of the wispr-glow 0.1.3 bundle (edge-aura, wispr-flow, wispr-status-hidden).",
+  "dependencies": [
+    "hyprland"
+  ],
+  "settings": [
+    "KIBBY_WISPR_INPUT_GAIN",
+    "KIBBY_WISPR_CAVA_SENSITIVITY"
+  ],
+  "hyprland": [
+    "kibby.wispr-glow"
+  ],
+  "system": {
+    "pacman": [
+      "cava",
+      "libpulse",
+      "python"
+    ],
+    "aur": [
+      "wispr-flow-hyprland",
+      "quickshell-git"
+    ]
+  }
+}

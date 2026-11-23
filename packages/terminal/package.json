@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 2,
+  "id": "terminal",
+  "name": "Terminal and tools",
+  "version": "0.1.0",
+  "kind": "config",
+  "license": "GPL-3.0-or-later",
+  "description": "kitty, Alacritty, fish, fuzzel, Helix and micro settings.",
+  "dependencies": [],
+  "system": {
+    "pacman": [
+      "kitty",
+      "alacritty",
+      "fish",
+      "fuzzel",
+      "helix",
+      "micro"
+    ],
+    "aur": []
+  }
+}

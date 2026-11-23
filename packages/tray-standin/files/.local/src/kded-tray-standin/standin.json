@@ -1,0 +1,8 @@
+{
+    "KPlugin": {
+        "Name": "Tray handled by Caelestia",
+        "Description": "Stand-in so kded6 never claims org.kde.StatusNotifierWatcher in the Hyprland session"
+    },
+    "X-KDE-Kded-autoload": false,
+    "X-KDE-Kded-load-on-demand": false
+}

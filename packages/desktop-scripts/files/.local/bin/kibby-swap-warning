@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+read_swap() {
+    awk '
+        NR > 1 { total += $3; used += $4 }
+        END {
+            percent = total > 0 ? int((used * 100) / total) : 0
+            printf "%d %d %d\n", total, used, percent
+        }
+    ' /proc/swaps
+}
+
+if [[ "${1:-}" == "--check" ]]; then
+    read -r total_kib used_kib percent < <(read_swap)
+    used_label="$(numfmt --to=iec-i --suffix=B "$((used_kib * 1024))")"
+    total_label="$(numfmt --to=iec-i --suffix=B "$((total_kib * 1024))")"
+    printf '%s %s %s\n' "$percent" "$used_label" "$total_label"
+    exit 0
+fi
+
+if [[ "${1:-}" == "--test-overlay" ]]; then
+    exec qs \
+        -c caelestia \
+        ipc call swapWarning test
+fi
+
+printf 'Usage: %s --check | --test-overlay\n' "$0" >&2
+exit 2

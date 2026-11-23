@@ -1,0 +1,387 @@
+/* Material Dolphin chrome. Colours filled from the current Caelestia scheme. */
+
+* {
+    font-family: "Rubik";
+    font-size: 13px;
+}
+
+QMainWindow,
+DolphinMainWindow,
+QWidget#centralwidget {
+    background-color: $surface;
+    color: $onSurface;
+}
+
+QToolTip {
+    background-color: $surfaceContainerHigh;
+    color: $onSurface;
+    border: 1px solid $outlineVariant;
+    border-radius: 10px;
+    padding: 6px 10px;
+}
+
+/* ---- Places sidebar ---- */
+
+QDockWidget,
+QDockWidget > QWidget {
+    background-color: $surfaceContainer;
+    color: $onSurface;
+    border: none;
+    titlebar-close-icon: none;
+    titlebar-normal-icon: none;
+}
+
+QDockWidget::title {
+    background-color: $surfaceContainer;
+    color: $outline;
+    text-align: left;
+    padding: 10px 16px 4px 16px;
+    border: none;
+}
+
+KFilePlacesView,
+KFilePlacesView QWidget,
+QListView#placesView {
+    background-color: $surfaceContainer;
+    color: $onSurface;
+    border: none;
+    outline: none;
+    padding: 4px 6px 12px 6px;
+    show-decoration-selected: 1;
+}
+
+KFilePlacesView::item,
+QListView#placesView::item {
+    background-color: transparent;
+    color: $onSurface;
+    border: none;
+    border-radius: 18px;
+    padding: 7px 14px;
+    margin: 2px 8px;
+    min-height: 30px;
+}
+
+KFilePlacesView::item:hover,
+QListView#placesView::item:hover {
+    background-color: $surfaceContainerHigh;
+    color: $onSurface;
+}
+
+KFilePlacesView::item:selected,
+KFilePlacesView::item:selected:hover,
+KFilePlacesView::item:selected:active,
+QListView#placesView::item:selected,
+QListView#placesView::item:selected:hover,
+QListView#placesView::item:selected:active {
+    background-color: $primary;
+    color: $onPrimary;
+}
+
+KFilePlacesView::item:selected:!active,
+QListView#placesView::item:selected:!active {
+    background-color: $primary;
+    color: $onPrimary;
+}
+
+KFilePlacesView::section {
+    background-color: transparent;
+    color: $outline;
+    padding: 14px 16px 4px 16px;
+}
+
+/* ---- Main view ---- */
+
+QAbstractItemView {
+    background-color: $surface;
+    color: $onSurface;
+    alternate-background-color: $surfaceContainerLow;
+    outline: none;
+    border: none;
+    selection-background-color: $primaryContainer;
+    selection-color: $onPrimaryContainer;
+    show-decoration-selected: 1;
+}
+
+QAbstractItemView::item:selected {
+    background-color: $primaryContainer;
+    color: $onPrimaryContainer;
+    border-radius: 16px;
+}
+
+QAbstractItemView::item:hover {
+    background-color: $hover;
+    border-radius: 16px;
+}
+
+QHeaderView::section {
+    background-color: $surface;
+    color: $onSurfaceVariant;
+    border: none;
+    padding: 8px 10px;
+    font-size: 12px;
+}
+
+/* ---- Breadcrumb / location ---- */
+
+KUrlNavigator,
+DolphinUrlNavigator,
+UrlNavigator {
+    background-color: $surfaceContainerHighest;
+    color: $onSurface;
+    border: none;
+    border-radius: 20px;
+    padding: 2px 8px;
+    min-height: 36px;
+    margin: 8px 12px 6px 12px;
+}
+
+KUrlNavigator QToolButton,
+DolphinUrlNavigator QToolButton,
+KUrlNavigator QLabel,
+KUrlNavigator QLineEdit {
+    background-color: transparent;
+    color: $onSurface;
+    border: none;
+    border-radius: 12px;
+    padding: 4px 8px;
+}
+
+KUrlNavigator QToolButton:hover,
+DolphinUrlNavigator QToolButton:hover {
+    background-color: $surfaceContainerHigh;
+}
+
+KUrlNavigator QLineEdit {
+    selection-background-color: $primary;
+    selection-color: $onPrimary;
+}
+
+/* ---- Toolbars, tabs, buttons ---- */
+
+QToolBar {
+    background-color: $surface;
+    border: none;
+    spacing: 4px;
+    padding: 4px 8px;
+}
+
+QToolButton {
+    background-color: $surfaceContainerHighest;
+    color: $onSurface;
+    border: none;
+    border-radius: 16px;
+    padding: 6px;
+    min-width: 28px;
+    min-height: 28px;
+}
+
+QToolButton:hover {
+    background-color: $surfaceContainerHigh;
+}
+
+QToolButton:checked,
+QToolButton:pressed {
+    background-color: $primary;
+    color: $onPrimary;
+}
+
+QTabBar {
+    background-color: $surface;
+    qproperty-drawBase: 0;
+}
+
+QTabBar::tab {
+    background-color: transparent;
+    color: $onSurfaceVariant;
+    border: none;
+    border-radius: 12px;
+    padding: 6px 14px;
+    margin: 6px 3px;
+}
+
+QTabBar::tab:selected {
+    background-color: $surfaceContainerHighest;
+    color: $onSurface;
+}
+
+QTabBar::tab:hover:!selected {
+    background-color: $surfaceContainerHigh;
+}
+
+QTabWidget::pane {
+    background-color: $surface;
+    border: none;
+}
+
+QPushButton {
+    background-color: $surfaceContainerHigh;
+    color: $onSurface;
+    border: none;
+    border-radius: 14px;
+    padding: 8px 16px;
+}
+
+QPushButton:hover {
+    background-color: $surfaceContainerHighest;
+}
+
+QPushButton:pressed,
+QPushButton:default {
+    background-color: $primary;
+    color: $onPrimary;
+}
+
+QLineEdit,
+QComboBox,
+QSpinBox,
+QAbstractSpinBox {
+    background-color: $surfaceContainerHighest;
+    color: $onSurface;
+    border: none;
+    border-radius: 14px;
+    padding: 6px 12px;
+    min-height: 28px;
+    selection-background-color: $primary;
+    selection-color: $onPrimary;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 24px;
+}
+
+QComboBox QAbstractItemView {
+    background-color: $surfaceContainerHigh;
+    color: $onSurface;
+    border: 1px solid $outlineVariant;
+    border-radius: 12px;
+    padding: 4px;
+}
+
+/* ---- Status / splitters / scroll ---- */
+
+QStatusBar,
+DolphinStatusBar {
+    background-color: $surfaceContainerHighest;
+    color: $onSurfaceVariant;
+    border: none;
+    border-radius: 20px;
+    min-height: 40px;
+    margin: 8px 16px 12px 16px;
+    padding: 4px 16px;
+}
+
+QStatusBar QLabel,
+QStatusBar QSlider,
+DolphinStatusBar QLabel {
+    background-color: transparent;
+    color: $onSurfaceVariant;
+}
+
+QSlider::groove:horizontal {
+    background: $outlineVariant;
+    height: 4px;
+    border-radius: 2px;
+}
+
+QSlider::handle:horizontal {
+    background: $primary;
+    width: 14px;
+    height: 14px;
+    margin: -5px 0;
+    border-radius: 7px;
+}
+
+QSlider::sub-page:horizontal {
+    background: $primary;
+    border-radius: 2px;
+}
+
+QSplitter::handle {
+    background-color: $outlineVariant;
+    width: 1px;
+    margin: 12px 0;
+}
+
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 10px 2px;
+}
+
+QScrollBar::handle:vertical {
+    background: $outlineVariant;
+    border-radius: 5px;
+    min-height: 28px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: $outline;
+}
+
+QScrollBar:horizontal {
+    background: transparent;
+    height: 10px;
+    margin: 2px 10px;
+}
+
+QScrollBar::handle:horizontal {
+    background: $outlineVariant;
+    border-radius: 5px;
+    min-width: 28px;
+}
+
+QScrollBar::add-line,
+QScrollBar::sub-line,
+QScrollBar::add-page,
+QScrollBar::sub-page {
+    background: none;
+    border: none;
+    width: 0;
+    height: 0;
+}
+
+QMenu {
+    background-color: $surfaceContainerHigh;
+    color: $onSurface;
+    border: 1px solid $outlineVariant;
+    border-radius: 12px;
+    padding: 6px;
+}
+
+QMenu::item {
+    background-color: transparent;
+    border-radius: 8px;
+    padding: 7px 18px;
+}
+
+QMenu::item:selected {
+    background-color: $primaryContainer;
+    color: $onPrimaryContainer;
+}
+
+QMenu::separator {
+    height: 1px;
+    background: $outlineVariant;
+    margin: 4px 10px;
+}
+
+QProgressBar {
+    background-color: $surfaceContainerHighest;
+    border: none;
+    border-radius: 4px;
+    height: 6px;
+    text-align: center;
+    color: transparent;
+}
+
+QProgressBar::chunk {
+    background-color: $primary;
+    border-radius: 4px;
+}
+
+QFrame#separator,
+QFrame[frameShape="4"],
+QFrame[frameShape="5"] {
+    color: $outlineVariant;
+}

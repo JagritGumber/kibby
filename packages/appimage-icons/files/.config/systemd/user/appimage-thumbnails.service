@@ -1,0 +1,6 @@
+[Unit]
+Description=Set Dolphin icons for AppImages whose own icon link is broken
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/appimage-thumbnails

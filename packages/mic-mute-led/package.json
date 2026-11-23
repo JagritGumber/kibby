@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 2,
+  "id": "mic-mute-led",
+  "name": "Mic-mute LED sync",
+  "version": "0.1.0",
+  "kind": "component",
+  "license": "GPL-3.0-or-later",
+  "description": "Keeps a laptop's microphone-mute LED in step with PipeWire's default source.",
+  "dependencies": [],
+  "settings": [
+    "KIBBY_MIC_MUTE_LED_DEVICE"
+  ],
+  "services": [
+    {
+      "unit": "mic-mute-led-sync.service",
+      "wantedBy": "default.target"
+    }
+  ],
+  "system": {
+    "pacman": [
+      "brightnessctl",
+      "libpulse",
+      "wireplumber"
+    ],
+    "aur": []
+  }
+}

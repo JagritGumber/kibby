@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch ~/Applications for AppImages that need their icon set
+
+[Path]
+PathChanged=%h/Applications
+Unit=appimage-thumbnails.service
+
+[Install]
+WantedBy=default.target

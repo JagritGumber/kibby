@@ -1,0 +1,12 @@
+[Unit]
+Description=Store %i clipboard entries in cliphist
+Documentation=https://github.com/sentriz/cliphist
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/wl-paste --type %i --watch /usr/bin/cliphist store
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

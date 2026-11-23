@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+profile=${HELIUM_PROFILE_ROOT:-"${XDG_CONFIG_HOME:-$HOME/.config}/net.imput.helium"}
+browser_pid=$(pgrep -o -x helium || true)
+
+[[ -n "$browser_pid" ]] || exit 0
+[[ $(readlink -f "/proc/$browser_pid/exe" 2>/dev/null) == /opt/helium-browser-bin/helium ]] || exit 1
+[[ -O "$profile" ]] || exit 1
+
+socket_path=
+for fd in "/proc/$browser_pid/fd/"*; do
+    target=$(readlink "$fd" 2>/dev/null || true)
+    [[ $target =~ ^socket:\[([0-9]+)\]$ ]] || continue
+    candidate=$(awk -v inode="${BASH_REMATCH[1]}" \
+        '$7 == inode && $8 ~ /^\/tmp\/org\.chromium\.Chromium\.[^/]+\/SingletonSocket$/ { print $8 }' \
+        /proc/net/unix)
+    [[ -n "$candidate" ]] || continue
+    socket_path=$candidate
+    break
+done
+
+[[ -S "$socket_path" ]] || exit 1
+socket_dir=${socket_path%/SingletonSocket}
+[[ -O "$socket_dir" ]] || exit 1
+
+lock="$(hostname)-$browser_pid"
+cookie_path="$profile/SingletonCookie"
+remote_cookie_path="$socket_dir/SingletonCookie"
+cookie=$(readlink "$remote_cookie_path" 2>/dev/null || true)
+profile_cookie=$(readlink "$cookie_path" 2>/dev/null || true)
+
+if [[ $(readlink "$profile/SingletonLock" 2>/dev/null || true) == "$lock" \
+    && $(readlink "$profile/SingletonSocket" 2>/dev/null || true) == "$socket_path" \
+    && -n "$cookie" && "$profile_cookie" == "$cookie" ]]; then
+    exit 0
+fi
+
+[[ -n "$cookie" ]] || cookie=$(tr -d - < /proc/sys/kernel/random/uuid)
+
+replace_symlink() {
+    local target=$1
+    local path=$2
+    local temporary="${path}.repair.$$"
+
+    if [[ -e "$path" && ! -L "$path" ]]; then
+        printf 'refusing to replace non-symlink: %s\n' "$path" >&2
+        exit 1
+    fi
+
+    ln -s "$target" "$temporary"
+    mv -Tf "$temporary" "$path"
+}
+
+replace_symlink "$cookie" "$remote_cookie_path"
+replace_symlink "$cookie" "$cookie_path"
+replace_symlink "$socket_path" "$profile/SingletonSocket"
+replace_symlink "$lock" "$profile/SingletonLock"
+
+printf 'repaired Helium single-instance handoff for pid %s\n' "$browser_pid" >&2

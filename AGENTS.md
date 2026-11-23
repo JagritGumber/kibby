@@ -1,13 +1,11 @@
 # Kibby agent entrypoint
 
-Preserve the user's existing Hyprland configuration; Kibby owns only marked
-includes and files below Kibby-owned directories. Read `docs/architecture.md`
-and the relevant package manifest before editing.
+Kibby is Jagrit's desktop dots, packaged: Hyprland plus the Caelestia shell, with his own additions. Read `README.md` for the layout and the manifest fields.
 
-- Never automate package removal, AUR builds, theme replacement, or arbitrary
-  privileged hooks.
-- Keep CLI wrappers thin; transaction, validation, and recovery behavior belongs
-  in `kibby-core`.
-- Test mutating behavior with a temporary HOME before proposing a live canary.
-- Keep private migrations, personal journals, session handoffs, and worktree
-  state outside the public repository.
+- Never run `./install` against a real home. Test with a throwaway one, for example `HOME=$(mktemp -d) ./install`, and read the result.
+- Never vendor upstream code that can be fetched instead. Changes to the Caelestia shell go to the fork, `JagritGumber/caelestia-shell` (branch `kibby`, one commit per change, listed in its `KIBBY.md`). Then pin the new commit in `packages/caelestia-shell/package.json`. To move to a new upstream release, rebase `kibby` onto the release tag, account for every conflict, and load the shell on a headless output before pinning.
+- CachyOS's Hyprland template states no licence. Fetch it at install time and never copy its text into Kibby. Express changes to it as Kibby Lua that loads after it.
+- Machine- or person-specific values become settings: add a `KIBBY_*` default to `settings.default.env`, then use `{{KIBBY_*}}` in files or read the settings file in scripts. Use `{{HOME}}` or `$HOME`, never a literal home path.
+- Leave out personal apps, credentials, emails and private hostnames. Before each commit, scan for secrets (gitleaks if installed, otherwise grep) and never write a secret's value into notes.
+- The installer writes only below `$HOME`. System files, builds and `systemctl` are printed for the user to run.
+- Keep each package one folder, `packages/<id>/`, with `package.json` at schemaVersion 2.

@@ -1,5 +1,5 @@
-/target/
-/.cache/
-/.agents/
-*.swp
-*.tmp
+__pycache__/
+build/
+*.log
+.env
+.env.*

@@ -1,0 +1,218 @@
+#!/usr/bin/env python3
+"""Give AppImages with a broken icon link their real icon in Dolphin.
+
+KDE's AppImage thumbnailer (kio-extras, which needs libappimage) reads only
+the `.DirIcon` inside an AppImage. Some packagers ship a `.DirIcon` link that
+points at nothing (the Epic Games Launcher AppImage does), so the file manager
+falls back to the generic AppImage icon.
+
+For those, this finds the icon the AppImage's own .desktop entry names, takes
+its largest PNG (or renders its SVG), and writes it into the freedesktop
+thumbnail cache exactly as KIO writes its own thumbnails. KIO uses a cached
+thumbnail while the file's mtime and size still match, so Dolphin shows it.
+When the AppImage is replaced the entry goes stale; the
+appimage-thumbnails.path user unit reruns this whenever ~/Applications changes.
+
+Usage: appimage-thumbnails [DIR_OR_APPIMAGE ...]    (default: ~/Applications)
+"""
+
+import contextlib
+import ctypes
+import hashlib
+import io
+import os
+import re
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from urllib.parse import quote
+
+from PIL import Image, PngImagePlugin
+
+# The cache folders KIO reads, by the largest edge each holds.
+SIZES = {"normal": 128, "large": 256, "x-large": 512, "xx-large": 1024}
+MIMETYPE = "application/vnd.appimage"
+
+
+def load_libappimage():
+    try:
+        lib = ctypes.CDLL("libappimage.so.1.0")
+    except OSError:
+        sys.exit("appimage-thumbnails: needs libappimage (sudo pacman -S libappimage)")
+    lib.appimage_list_files.argtypes = [ctypes.c_char_p]
+    lib.appimage_list_files.restype = ctypes.POINTER(ctypes.c_char_p)
+    lib.appimage_string_list_free.argtypes = [ctypes.POINTER(ctypes.c_char_p)]
+    lib.appimage_read_file_into_buffer_following_symlinks.argtypes = [
+        ctypes.c_char_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_ulong)]
+    lib.appimage_read_file_into_buffer_following_symlinks.restype = ctypes.c_bool
+    return lib
+
+
+LIB = load_libappimage()
+LIBC = ctypes.CDLL(None)
+LIBC.free.argtypes = [ctypes.c_void_p]
+
+
+@contextlib.contextmanager
+def quiet_stderr():
+    """libappimage prints "ERROR: … Entry doesn't exists" for every missing
+    file, which is the normal answer when checking for a broken .DirIcon."""
+    sys.stderr.flush()
+    saved = os.dup(2)
+    with open(os.devnull, "wb") as null:
+        os.dup2(null.fileno(), 2)
+    try:
+        yield
+    finally:
+        os.dup2(saved, 2)
+        os.close(saved)
+
+
+def read_entry(appimage: Path, entry: str) -> bytes | None:
+    """One file inside the AppImage, following links; None when it (or the
+    link's target) is missing."""
+    buffer, size = ctypes.c_void_p(), ctypes.c_ulong()
+    with quiet_stderr():
+        found = LIB.appimage_read_file_into_buffer_following_symlinks(
+            bytes(appimage), entry.encode(), ctypes.byref(buffer), ctypes.byref(size))
+    if not found:
+        return None
+    try:
+        return ctypes.string_at(buffer, size.value)
+    finally:
+        LIBC.free(buffer)
+
+
+def entries(appimage: Path) -> list[str]:
+    listing = LIB.appimage_list_files(bytes(appimage))
+    found = []
+    index = 0
+    while listing and listing[index]:
+        found.append(listing[index].decode(errors="replace"))
+        index += 1
+    if listing:
+        LIB.appimage_string_list_free(listing)
+    return found
+
+
+def png_size(data: bytes) -> int:
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        return 0
+    width, height = struct.unpack(">II", data[16:24])
+    return min(width, height)
+
+
+def icon_name(appimage: Path, names: list[str]) -> str | None:
+    """The Icon= key of the AppImage's top-level .desktop entry."""
+    for name in names:
+        if "/" not in name and name.endswith(".desktop"):
+            text = (read_entry(appimage, name) or b"").decode(errors="replace")
+            match = re.search(r"^Icon=(.+)$", text, re.MULTILINE)
+            if match:
+                return Path(match.group(1).strip()).stem
+    return None
+
+
+def best_icon(appimage: Path) -> Image.Image | None:
+    names = entries(appimage)
+    icon = icon_name(appimage, names)
+    if icon is None:
+        return None
+    # The named icon at the top level, or in the bundled hicolor theme.
+    candidates = [n for n in names if n == f"{icon}.png"
+                  or re.fullmatch(rf"usr/share/icons/hicolor/[^/]+/apps/{re.escape(icon)}\.png", n)]
+    pngs = [(png_size(data), data) for data in (read_entry(appimage, n) for n in candidates) if data]
+    pngs.sort(key=lambda pair: pair[0], reverse=True)
+    if pngs and pngs[0][0] >= 256:
+        return Image.open(io.BytesIO(pngs[0][1])).convert("RGBA")
+    svgs = [n for n in names if n == f"{icon}.svg"
+            or re.fullmatch(rf"usr/share/icons/hicolor/scalable/apps/{re.escape(icon)}\.svg", n)]
+    svg = read_entry(appimage, svgs[0]) if svgs else None
+    if svg and shutil.which("rsvg-convert"):
+        rendered = subprocess.run(["rsvg-convert", "-w", "512", "-h", "512", "--keep-aspect-ratio"],
+                                  input=svg, capture_output=True, check=False)
+        if rendered.returncode == 0:
+            return Image.open(io.BytesIO(rendered.stdout)).convert("RGBA")
+    if pngs and pngs[0][0] > 0:
+        return Image.open(io.BytesIO(pngs[0][1])).convert("RGBA")
+    return None
+
+
+def kio_uri(path: Path) -> str:
+    """The URL KIO hashes for the cache file name: QUrl::fromLocalFile(path).url().
+    Qt leaves RFC 3986 sub-delimiters and non-ASCII letters as they are."""
+    keep = "/!$&'()*+,;=:@-._~"
+    return "file://" + "".join(
+        ch if ch in keep or (ch.isascii() and ch.isalnum()) or not ch.isascii() else quote(ch)
+        for ch in str(path))
+
+
+def cache_root() -> Path:
+    return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "thumbnails"
+
+
+def is_current(thumbnail: Path, uri: str, stat: os.stat_result) -> bool:
+    try:
+        with Image.open(thumbnail) as image:
+            text = image.text
+    except (OSError, SyntaxError):
+        return False
+    return (text.get("Thumb::URI") == uri and text.get("Thumb::MTime") == str(int(stat.st_mtime))
+            and text.get("Thumb::Size") == str(stat.st_size))
+
+
+def write_thumbnails(appimage: Path, icon: Image.Image) -> None:
+    stat = appimage.stat()
+    uri = kio_uri(appimage)
+    name = hashlib.md5(uri.encode()).hexdigest() + ".png"
+    info = PngImagePlugin.PngInfo()
+    for key, value in (("Thumb::URI", uri), ("Thumb::MTime", str(int(stat.st_mtime))),
+                       ("Thumb::Size", str(stat.st_size)), ("Thumb::Mimetype", MIMETYPE),
+                       ("Software", "appimage-thumbnails")):
+        info.add_text(key, value)
+    for folder, edge in SIZES.items():
+        directory = cache_root() / folder
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        image = icon.copy()
+        if max(image.size) > edge:
+            image.thumbnail((edge, edge), Image.Resampling.LANCZOS)
+        # Atomic: KIO may be reading the cache right now.
+        handle, temporary = tempfile.mkstemp(dir=directory, suffix=".png")
+        with os.fdopen(handle, "wb") as out:
+            image.save(out, "PNG", pnginfo=info)
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, directory / name)
+
+
+def appimages(targets: list[str]) -> list[Path]:
+    found = []
+    for target in targets:
+        path = Path(target).expanduser().resolve()
+        if path.is_dir():
+            found += sorted(p for p in path.iterdir() if p.is_file() and p.suffix.lower() == ".appimage")
+        elif path.is_file():
+            found.append(path)
+    return found
+
+
+def main() -> None:
+    for appimage in appimages(sys.argv[1:] or ["~/Applications"]):
+        if read_entry(appimage, ".DirIcon") is not None:
+            continue  # KDE's own thumbnailer handles this one.
+        stat = appimage.stat()
+        uri = kio_uri(appimage)
+        if is_current(cache_root() / "large" / (hashlib.md5(uri.encode()).hexdigest() + ".png"), uri, stat):
+            continue
+        icon = best_icon(appimage)
+        if icon is None:
+            print(f"{appimage.name}: no icon inside")
+            continue
+        write_thumbnails(appimage, icon)
+        print(f"{appimage.name}: icon set ({icon.width}x{icon.height})")
+
+
+if __name__ == "__main__":
+    main()
