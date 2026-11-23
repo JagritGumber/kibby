@@ -160,7 +160,11 @@ def plan_package(plan, package, values):
         unit = service.get("provided") or str(home / ".config/systemd/user" / service["unit"])
         for instance in service.get("instances", [None]):
             name = service["unit"].replace("@.", f"@{instance}.") if instance else service["unit"]
-            plan.links.append((wants / name, unit, package["id"]))
+            link = wants / name
+            if link.is_symlink() and os.readlink(link) == unit:
+                plan.unchanged += 1
+                continue
+            plan.links.append((link, unit, package["id"]))
 
     for item in package.get("systemFiles", []):
         condition = item.get("when")
