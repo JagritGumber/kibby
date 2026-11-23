@@ -7,5 +7,6 @@ Kibby is Jagrit's desktop dots, packaged: Hyprland plus the Caelestia shell, wit
 - CachyOS's Hyprland template states no licence. Fetch it at install time and never copy its text into Kibby. Express changes to it as Kibby Lua that loads after it.
 - Machine- or person-specific values become settings: add a `KIBBY_*` default to `settings.default.env`, then use `{{KIBBY_*}}` in files or read the settings file in scripts. Use `{{HOME}}` or `$HOME`, never a literal home path.
 - Leave out personal apps, credentials, emails and private hostnames. Before each commit, scan for secrets (gitleaks if installed, otherwise grep) and never write a secret's value into notes.
-- The installer writes only below `$HOME`. System files, builds and `systemctl` are printed for the user to run.
+- The installer writes only below `$HOME`. System files, builds and `systemctl` are printed for the user to run. A `postInstall` command follows the same rules and prints `next: ` lines for whatever it could not finish.
+- To test a `postInstall` command, run the installer with a throwaway HOME and XDG dirs, inside `dbus-run-session` and with no display. Otherwise gsettings and KDE tools reach the real session.
 - Keep each package one folder, `packages/<id>/`, with `package.json` at schemaVersion 2.

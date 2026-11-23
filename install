@@ -9,9 +9,11 @@
     --settings FILE   use FILE as ~/.config/kibby/settings.env from now on
 
 Everything lands below $HOME. Files that would be replaced are backed up to
-~/.local/state/kibby/backups/<time>/ first. The installer never uses sudo and
-never runs systemctl: it prints the commands for system files, builds and
-user services instead.
+~/.local/state/kibby/backups/<time>/ first. Once everything is in place it runs
+each package's postInstall commands (theme-sync applies the Dolphin style and
+icons). It never uses sudo and never runs systemctl: it prints the commands for
+system files, builds and user services instead, with whatever a postInstall
+command could not finish.
 """
 
 import argparse
@@ -132,6 +134,7 @@ class Plan:
         self.system = []      # (rendered path in home, real target)
         self.builds = []      # (package, command)
         self.notes = []       # (package, note)
+        self.post = []        # (package, command, required tools)
         self.unchanged = 0
 
     def write(self, target, data, mode, package):
@@ -145,9 +148,15 @@ class Plan:
 def plan_package(plan, package, values):
     home = plan.home
     files = package["root"] / "files"
+    # Files a program rewrites itself (Caelestia regenerates them on every
+    # colour change): written once, then left to that program.
+    seeds = set(package.get("seed", []))
     if files.is_dir():
         for source in sorted(p for p in files.rglob("*") if p.is_file()):
             relative = source.relative_to(files)
+            if str(relative) in seeds and (home / relative).exists():
+                plan.unchanged += 1
+                continue
             data = render_bytes(source.read_bytes(), values, f"{package['id']}/files/{relative}")
             mode = source.stat().st_mode & 0o777
             plan.write(home / relative, data, mode, package["id"])
@@ -180,6 +189,9 @@ def plan_package(plan, package, values):
         plan.builds.append((package["id"], command))
     for note in package.get("notes", []):
         plan.notes.append((package["id"], note))
+    for step in package.get("postInstall", []):
+        command = render(step["run"], values, f"{package['id']}/postInstall")
+        plan.post.append((package["id"], command, step.get("requires", [])))
 
 
 def init_lua(packages, installed):
@@ -276,6 +288,36 @@ def apply_upstream(plan, package, entry):
     print(f"  {entry['dest']}  {label}")
 
 
+def shown(command, home):
+    """A command as the user would type it: ~ for the home directory."""
+    return "~" + command[len(str(home)):] if command.startswith(f"{home}/") else command
+
+
+def run_post_install(plan):
+    """Run each package's postInstall commands once everything is in place.
+
+    A command whose tools are missing is left as a next step. Lines a command
+    prints that start with "next: " say what it could not finish; they become
+    next steps too. Returns those next steps.
+    """
+    later = []
+    for package, command, requires in plan.post:
+        missing = [tool for tool in requires if shutil.which(tool) is None]
+        if missing:
+            later.append(f"{shown(command, plan.home)}   # {package}: install {', '.join(missing)} first")
+            continue
+        result = subprocess.run([command], capture_output=True, text=True)
+        for line in result.stdout.splitlines():
+            if line.startswith("next: "):
+                later.append(f"{line[len('next: '):]}   # {package}")
+        if result.returncode == 0:
+            print(f"  ran     {shown(command, plan.home)}  [{package}]")
+        else:
+            reason = (result.stderr.strip().splitlines() or [f"exit {result.returncode}"])[-1]
+            later.append(f"{shown(command, plan.home)}   # {package}: failed ({reason}); run it again once that is fixed")
+    return later
+
+
 def check_pins(packages, names):
     """Warn when an installed system package differs from the version Kibby was built against."""
     if not shutil.which("pacman"):
@@ -361,6 +403,8 @@ def main():
         print(f"  fetch   {entry['name']} {entry.get('ref', entry['commit'][:12])} -> {where}  [{package['id']}]")
     for link, unit, package in plan.links:
         print(f"  enable  {link.relative_to(home)}  [{package}]")
+    for package, command, _ in plan.post:
+        print(f"  run     {shown(command, home)}  [{package}]")
     print(f"  ({plan.unchanged} files already up to date)")
 
     if args.dry_run:
@@ -385,6 +429,7 @@ def main():
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
 
+    later = run_post_install(plan)
     if plan.backup_root.is_dir():
         print(f"Replaced files are kept in {plan.backup_root}")
     check_pins(packages, names)
@@ -393,6 +438,7 @@ def main():
         steps.append("systemctl --user daemon-reload   # then log out and back in")
     steps += [f"sudo install -Dm644 {staged} {target}" for staged, target in plan.system]
     steps += [f"{command}   # {package}" for package, command in plan.builds]
+    steps += later
     steps += [f"{note}   # {package}" for package, note in plan.notes]
     if steps:
         print("\nNext steps:")

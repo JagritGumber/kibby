@@ -11,7 +11,7 @@ It runs on Arch Linux and CachyOS, with Hyprland 0.57 or newer (the Lua config).
 | `hyprland` | Hyprland in Lua. The base is CachyOS's Hyprland template, fetched at a pinned commit. On top of it: number keys go to workspaces, a scratchpad toggle, the monitor rule from settings, the touchpad key, an empty wallpaper workspace, and the Caelestia bridge (launcher, sidebar, lock, OSD keys, OCR and translate, the colour picker). |
 | `caelestia-shell` | Caelestia from Kibby's fork, [JagritGumber/caelestia-shell](https://github.com/JagritGumber/caelestia-shell): upstream v2.5.0 plus touchpad-lock and mic-mute feedback, each window's own app icon in the bar, tray fixes, system alerts, the profile picture cropper, and notification, lock, launcher and recorder changes. |
 | `caelestia-config` | Caelestia's `shell.json` and `cli.json`, and the Dolphin stylesheet template. |
-| `theme-sync` | Runs after every wallpaper change. It recolours KDE/Qt apps, GTK apps and the Papirus folders from the wallpaper's palette. |
+| `theme-sync` | Runs once at install and after every wallpaper change. It sets Dolphin's Material style and the caelestia-folders icons, and recolours KDE/Qt apps, GTK apps and the Papirus folders from the wallpaper's palette. |
 | `material-dolphin` | A Qt style plugin over Darkly. It gives Dolphin and the KDE file dialog Caelestia's Material look. Built from source. |
 | `tray-standin` | A kded module, so the system tray works without Plasma. Built from source. |
 | `wispr-glow` | While you dictate with Wispr Flow, the screen edges glow in the wallpaper's colours and ripple with your voice. Errors turn the glow red. Wispr's own bar stays hidden. |
@@ -35,12 +35,29 @@ cp settings.default.env ~/my-kibby.env && $EDITOR ~/my-kibby.env
 ./install --settings ~/my-kibby.env
 ```
 
-Then follow the "Next steps" the installer prints: reload systemd, run the `sudo` commands for keyd, and build the two plugins. Log out and back in to start the session.
+Then follow the "Next steps" the installer prints:
+- reload systemd
+- run the `sudo` commands for keyd
+- build the two plugins
+- pick a wallpaper, which colours everything
+
+Log out and back in to start the session.
 
 - Everything is written below `$HOME`.
 - Each file the install would replace is first copied to `~/.local/state/kibby/backups/<time>/`.
 - The installer never uses `sudo` and never runs `systemctl`.
 - To install only some packages, name them: `./install wispr-glow`. Their dependencies come along.
+
+## Dolphin's look
+
+Dolphin gets two things from Kibby:
+
+- **Caelestia's Material look.** The `material-dolphin` package is a Qt style plugin that redraws Dolphin and the KDE file dialog in the Caelestia shell's Material shapes, on top of Darkly. You build it yourself: run the three `cmake` lines from the installer's next steps. Until it is built, Dolphin keeps its default look.
+- **The caelestia-folders icons.** This is Papirus with its folder icons recoloured to match your wallpaper, plus a few plain icons for the Places panel. It needs Papirus (`papirus-icon-theme`, listed by `./install --deps`).
+
+**At install:** `./install` runs `caelestia-sync-kde-theme` once. It sets Dolphin's style to `caelestia` and its icon theme to `caelestia-folders`, for Qt and GTK apps too. It also builds caelestia-folders, but with Papirus's own blue folders, because Caelestia has no wallpaper colours yet. Dolphin picks this up the next time it starts in a Kibby session. The session is what lets Qt find the style, in `~/.local/lib/qt6/plugins`.
+
+**At every wallpaper change:** Caelestia runs the same script after it makes the new colours. The script recolours KDE and GTK apps and the folder icons, and running apps reload them. So the folders stay Papirus blue only until you first pick a wallpaper; the installer's next steps say so.
 
 ## Settings
 
@@ -86,6 +103,8 @@ packages/<id>/system/      files for / (rendered, then copied with sudo)
 | `systemFiles` | Files for `/` |
 | `build` | Build commands |
 | `notes` | Instructions printed after install |
+| `postInstall` | Commands run once everything is in place. A command whose tools are missing becomes a next step, and so do lines it prints that start with `next: ` |
+| `seed` | Files a program rewrites itself (Caelestia, on every colour change): written only when they do not exist yet |
 | `system` | pacman and AUR packages, and version pins |
 
 ## History

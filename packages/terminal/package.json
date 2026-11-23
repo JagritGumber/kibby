@@ -7,6 +7,9 @@
   "license": "GPL-3.0-or-later",
   "description": "kitty, Alacritty, fish, fuzzel, Helix and micro settings.",
   "dependencies": [],
+  "seed": [
+    ".config/fuzzel/fuzzel.ini"
+  ],
   "system": {
     "pacman": [
       "kitty",
