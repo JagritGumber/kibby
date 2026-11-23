@@ -32,6 +32,19 @@ jobs:
           echo "cava ascii_max_range=$conf, WisprActivity cavaRange=$qml"
           test -n "$conf" && test "$conf" = "$qml"
 
+      - name: wispr-glow shader sources and prebuilt packs
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, sys
+          pkg = pathlib.Path("packages/wispr-glow")
+          spec = json.loads((pkg / "package.json").read_text())["shaders"]
+          missing = [name for name in spec["sources"]
+                     if not (pkg / "files" / spec["dir"] / name).is_file()
+                     or not (pkg / spec["prebuilt"] / f"{name}.qsb").is_file()]
+          print("shaders:", ", ".join(spec["sources"]))
+          sys.exit(f"missing source or prebuilt pack: {missing}" if missing else 0)
+          PY
+
       - name: List and dependencies
         run: |
           ./install --list
@@ -46,6 +59,10 @@ jobs:
             echo "placeholders were left unrendered"; exit 1
           fi
           find "$home/.config/hypr" -name '*.lua' -exec luac5.4 -p {} +
+          for name in edgeglow.frag ribbon.vert ribbon.frag bottombars.vert bottombars.frag; do
+            test -s "$home/.config/quickshell/wispr-glow/$name.qsb"
+          done
+          test -d "$home/.local/state/wispr-glow"
           pinned=$(python3 -c 'import json; print(json.load(open("packages/caelestia-shell/package.json"))["upstream"][0]["commit"])')
           test "$(git -C "$home/.config/quickshell/caelestia" rev-parse HEAD)" = "$pinned"
           HOME="$home" ./install | tee second-run.txt

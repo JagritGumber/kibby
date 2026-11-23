@@ -9,11 +9,14 @@
     --settings FILE   use FILE as ~/.config/kibby/settings.env from now on
 
 Everything lands below $HOME. Files that would be replaced are backed up to
-~/.local/state/kibby/backups/<time>/ first. Once everything is in place it runs
-each package's postInstall commands (theme-sync applies the Dolphin style and
-icons). It never uses sudo and never runs systemctl: it prints the commands for
-system files, builds and user services instead, with whatever a postInstall
-command could not finish.
+~/.local/state/kibby/backups/<time>/ first. Once everything is in place it
+runs each package's postInstall commands (theme-sync applies the Dolphin style
+and icons). Shader packs are built with the system qsb (qt6-shadertools) when
+it is there, and otherwise taken from the package's prebuilt packs;
+KIBBY_QSB=PATH picks a qsb, and KIBBY_QSB= (empty) forces the prebuilt packs.
+It never uses sudo and never runs systemctl: it prints the commands for system
+files, builds and user services instead, with whatever a postInstall command
+could not finish.
 """
 
 import argparse
@@ -139,6 +142,8 @@ class Plan:
         self.builds = []      # (package, command)
         self.notes = []       # (package, note)
         self.post = []        # (package, command, required tools)
+        self.dirs = []        # (directory, package)
+        self.shaders = []     # (package, how the shader packs were made)
         self.unchanged = 0
 
     def write(self, target, data, mode, package):
@@ -196,6 +201,68 @@ def plan_package(plan, package, values):
     for step in package.get("postInstall", []):
         command = render(step["run"], values, f"{package['id']}/postInstall")
         plan.post.append((package["id"], command, step.get("requires", [])))
+
+    state_home = Path(os.environ.get("XDG_STATE_HOME") or home / ".local/state")
+    for name in package.get("stateDirs", []):
+        folder = state_home / name
+        if not folder.resolve().is_relative_to(home.resolve()):
+            plan.notes.append((package["id"], f"mkdir -p {folder}  (outside $HOME, so not created)"))
+        elif folder.is_dir():
+            plan.unchanged += 1
+        else:
+            plan.dirs.append((folder, package["id"]))
+
+    if "shaders" in package:
+        plan_shaders(plan, package)
+
+
+# Where Qt's shader baker lives when it is not on PATH (qt6-shadertools).
+QSB_PATHS = ("/usr/lib/qt6/bin/qsb", "/usr/lib64/qt6/bin/qsb", "/usr/libexec/qt6/qsb")
+
+
+def find_qsb():
+    """The system qsb, or None. KIBBY_QSB picks one; KIBBY_QSB= (empty) forces the prebuilt packs."""
+    override = os.environ.get("KIBBY_QSB")
+    if override is not None:
+        return override or None
+    return shutil.which("qsb") or next((path for path in QSB_PATHS if os.access(path, os.X_OK)), None)
+
+
+def plan_shaders(plan, package):
+    """Shader packs (.qsb) next to their sources: built with the system qsb, so
+    they match the user's Qt, or else the package's prebuilt packs."""
+    spec = package["shaders"]
+    sources = package["root"] / "files" / spec["dir"]
+    qsb = find_qsb()
+    version = ""
+    if qsb:
+        probe = subprocess.run([qsb, "--version"], capture_output=True, text=True)
+        version = probe.stdout.strip() if probe.returncode == 0 else ""
+    built, prebuilt = [], []
+    with tempfile.TemporaryDirectory(prefix="kibby-qsb-") as scratch:
+        for name in spec["sources"]:
+            data = None
+            if qsb:
+                out = Path(scratch) / f"{name}.qsb"
+                result = subprocess.run([qsb, *spec["qsbArgs"], "-o", str(out), str(sources / name)],
+                                        capture_output=True, text=True)
+                if result.returncode == 0 and out.is_file():
+                    data = out.read_bytes()
+                    built.append(name)
+                else:
+                    reason = (result.stderr.strip().splitlines() or [f"exit {result.returncode}"])[-1]
+                    print(f"kibby: warning: qsb could not build {name} ({reason}); using the prebuilt pack", file=sys.stderr)
+            if data is None:
+                data = (package["root"] / spec["prebuilt"] / f"{name}.qsb").read_bytes()
+                prebuilt.append(name)
+            plan.write(plan.home / spec["dir"] / f"{name}.qsb", data, 0o644, package["id"])
+    if built:
+        plan.shaders.append((package["id"], f"{len(built)} shader packs built with {qsb}" + (f" ({version})" if version else "")))
+    if prebuilt:
+        plan.shaders.append((package["id"], f"{len(prebuilt)} prebuilt shader packs ({spec['prebuiltWith']})"))
+        fix = (f"{qsb} could not build {', '.join(prebuilt)} (see the warnings above)" if qsb
+               else "install qt6-shadertools, then run ./install again, to build the glow's shaders for your own Qt")
+        plan.notes.append((package["id"], f"{fix}; it is using packs built with {spec['prebuiltWith']}"))
 
 
 def init_lua(packages, installed):
@@ -384,6 +451,10 @@ def main():
         die(f"no settings file at {source}")
     settings = {**defaults, **read_env(source)}
     check_settings(settings, defaults)
+    for name in names:
+        for key, allowed in packages[name].get("choices", {}).items():
+            if settings.get(key) not in allowed:
+                die(f"{key} must be one of {', '.join(allowed)}, not {settings.get(key)!r}")
     values = {"HOME": str(home), **settings}
 
     plan = Plan(home)
@@ -409,6 +480,10 @@ def main():
         print(f"  enable  {link.relative_to(home)}  [{package}]")
     for package, command, _ in plan.post:
         print(f"  run     {shown(command, home)}  [{package}]")
+    for folder, package in plan.dirs:
+        print(f"  mkdir   {shown(str(folder), home)}  [{package}]")
+    for package, how in plan.shaders:
+        print(f"  shaders {how}  [{package}]")
     print(f"  ({plan.unchanged} files already up to date)")
 
     if args.dry_run:
@@ -419,6 +494,8 @@ def main():
         write_file(plan, target, data, mode)
     for package, entry in plan.upstreams:
         apply_upstream(plan, package, entry)
+    for folder, _ in plan.dirs:
+        folder.mkdir(parents=True, exist_ok=True)
     for link, unit, _ in plan.links:
         if link.is_symlink() and os.readlink(link) == unit:
             continue

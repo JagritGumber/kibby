@@ -23,6 +23,8 @@ ShellRoot {
         property string speechState: "idle"
         property real speechLevel: 0
         property var speechSpectrum: []
+        // The same voice in cava's 48 narrow bands, for the bottom lines.
+        property var speechBands: []
         property string speechError: ""
         // Nothing publishes "audio.activity" here; the glow treats it as quiet.
         property real audioLevel: 0
@@ -33,12 +35,18 @@ ShellRoot {
         readonly property color secondary: scheme.secondary ? `#${scheme.secondary}` : "#b5c9d7"
         readonly property color tertiary: scheme.tertiary ? `#${scheme.tertiary}` : "#d8deff"
         readonly property color error: scheme.error ? `#${scheme.error}` : "#fa746f"
+        readonly property color inversePrimary: scheme.inversePrimary ? `#${scheme.inversePrimary}` : "#3c6479"
+        // The bottom bars' look, "kurve", "wallpaper", "rainbow" or
+        // "caelestia", switched live with ~/.local/bin/wispr-glow-style.
+        // Until it is switched: KIBBY_WISPR_BAR_STYLE in ~/.config/kibby/settings.env.
+        property string barStyle: "{{KIBBY_WISPR_BAR_STYLE}}"
 
         function publish(channel, payload) {
             if (channel === "speech.activity") {
                 speechState = payload.state || "idle";
                 speechLevel = Number(payload.level || 0);
                 speechSpectrum = payload.spectrum || [];
+                speechBands = payload.bands || [];
                 speechError = payload.error || "";
             } else if (channel === "audio.activity") {
                 audioLevel = Number(payload.level || 0);
@@ -58,6 +66,30 @@ ShellRoot {
             } catch (error) {
                 console.warn("wispr-glow: could not read the Caelestia scheme:", error);
             }
+        }
+    }
+
+    FileView {
+        id: barStyleFile
+
+        path: `${Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state"}/wispr-glow/bar-style`
+        // Applies a switch at once; a folder that didn't exist at start can't
+        // be watched, so each dictation also reads the file afresh.
+        watchChanges: true
+        onFileChanged: reload()
+        onLoaded: {
+            const style = text().trim();
+            if (["kurve", "wallpaper", "rainbow", "caelestia"].includes(style))
+                bus.barStyle = style;
+        }
+    }
+
+    Connections {
+        target: bus
+
+        function onSpeechStateChanged() {
+            if (bus.speechState === "arming")
+                barStyleFile.reload();
         }
     }
 

@@ -18,6 +18,13 @@ Kibby is licensed under the GNU General Public License, version 3 (see `LICENSE`
   - The installer fetches them from CachyOS at commit baabb428.
   - Kibby's Hyprland files load after them and contain none of their text.
 
+## Approaches reimplemented, no code copied
+
+- wispr-glow's `caelestia` bar look follows the approach of Caelestia's desktop visualiser (caelestia-dots/shell, `modules/background/Visualiser.qml` and the `VisualiserBars` component, GPL-3.0): mirrored bars with rounded tops filling 69% of each slot, a primary-to-inversePrimary vertical gradient at 70%, and easing at a third of a 400 ms animation.
+- wispr-glow's `kurve`, `rainbow` and `wallpaper` bar looks follow the approach of the Kurve Plasma widget by Luis Bocanegra ([luisbocanegra/kurve](https://github.com/luisbocanegra/kurve), GPL-3.0): rounded bars at a 2:1 bar-to-gap ratio, a smooth horizontal colour gradient, and its Hue colour mode (hue 0-360, saturation 0.8, lightness 0.7).
+
+Both were reimplemented from that description for Kibby's own shaders; no code was copied from either project.
+
 ## Used, not included
 
 - [Quickshell](https://quickshell.org), [caelestia-cli](https://github.com/caelestia-dots/cli) and the Caelestia shell plugin, installed from the AUR.
