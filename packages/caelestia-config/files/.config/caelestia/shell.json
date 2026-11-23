@@ -48,7 +48,7 @@
             "recolour": false
         },
         "workspaces": {
-            "perMonitorWorkspaces": false,
+            "perMonitor": false,
             "showWindows": true,
             "showWindowsOnSpecialWorkspaces": true,
             "shown": 3
