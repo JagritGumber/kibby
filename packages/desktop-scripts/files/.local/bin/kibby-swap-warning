@@ -21,9 +21,10 @@ if [[ "${1:-}" == "--check" ]]; then
 fi
 
 if [[ "${1:-}" == "--test-overlay" ]]; then
+    # The shell's memory alert (SystemAlerts), in its test form.
     exec qs \
         -c caelestia \
-        ipc call swapWarning test
+        ipc call systemAlerts testMemory
 fi
 
 printf 'Usage: %s --check | --test-overlay\n' "$0" >&2

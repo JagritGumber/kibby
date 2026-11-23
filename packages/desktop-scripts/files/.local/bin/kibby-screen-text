@@ -82,12 +82,18 @@ if [[ "$mode" == "translate" ]]; then
     fi
 
     [[ -n "$target" ]] || exit 0
+    # A language code such as en, zh-CN or pt-BR; anything else is refused.
+    if [[ ! "$target" =~ ^[A-Za-z]{2,3}(-[A-Za-z]{2,4})?$ ]]; then
+        notify-send -u critical "Screen text" "Unknown language code: $target"
+        exit 1
+    fi
     if grep -qP '\p{Han}' <<<"$text"; then
         translation_input="${text//$'\n'/}"
     else
         translation_input="${text//$'\n'/ }"
     fi
-    result="$(trans -b -no-ansi -t "$target" "$translation_input" 2>/dev/null)"
+    # -- ends trans's options, so OCR text that starts with "-" stays text.
+    result="$(trans -b -no-ansi -t "$target" -- "$translation_input" 2>/dev/null)"
     if [[ -z "${result//[[:space:]]/}" ]]; then
         notify-send -u critical "Screen text" "Translation failed. OCR text was left unchanged."
         exit 1
