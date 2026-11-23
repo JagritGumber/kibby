@@ -35,17 +35,29 @@ fi
 target_scheme=$data_home/color-schemes/$scheme_name.colors
 icon_theme=caelestia-folders
 
-if [[ -s $source_scheme ]]; then
-    install -d -m 0755 "$(dirname "$target_scheme")"
-    staged=$(mktemp "$target_scheme.XXXXXX")
-    trap 'rm -f "$staged"' EXIT
-    install -m 0644 "$source_scheme" "$staged"
-    mv -f "$staged" "$target_scheme"
+# Applying the colour scheme repaints every running KDE app, and that repaint
+# is what shows the folder icons rebuilt below: their iconChanged signal only
+# drops the apps' icon caches. So the scheme is applied last. Applied first,
+# open apps such as Dolphin repainted with the old folders and kept them until
+# restarted. The EXIT trap still applies it if a step in between fails.
+apply_colour_scheme() {
     trap - EXIT
-
+    install -d -m 0755 "$(dirname "$target_scheme")"
+    local staged
+    staged=$(mktemp "$target_scheme.XXXXXX")
+    if ! { install -m 0644 "$source_scheme" "$staged" && mv -f "$staged" "$target_scheme"; }; then
+        rm -f "$staged"
+        return 1
+    fi
     plasma-apply-colorscheme "$scheme_name" >/dev/null
     rm -f "$data_home/color-schemes/$other_scheme.colors"
+}
+
+if [[ -s $source_scheme ]]; then
+    have_scheme=true
+    trap apply_colour_scheme EXIT
 else
+    have_scheme=false
     printf 'Caelestia KDE sync: no generated colour scheme yet (%s); applying the style and icons only\n' "$source_scheme" >&2
 fi
 kwriteconfig6 --file kdeglobals --group Icons --key Theme "$icon_theme"
@@ -279,4 +291,8 @@ fi
 # Running KDE apps drop their icon caches on this signal (kiconthemes).
 if command -v dbus-send >/dev/null; then
     dbus-send --session --type=signal /KIconLoader org.kde.KIconLoader.iconChanged int32:0 2>/dev/null || true
+fi
+
+if $have_scheme; then
+    apply_colour_scheme
 fi
