@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+"""Restart an open Dolphin so it redraws everything in the current colours.
+
+caelestia-sync-kde-theme runs this after a wallpaper change. Dolphin keeps the
+previews of folders that show their contents in memory, drawn with the folder
+icon of the moment, so only a restart redraws them in the new colours. It comes
+back with its tabs and folders, on its workspace, where it was.
+
+Dolphin is left running, and refreshes in place, while it copies, moves or
+deletes files, while a program runs in its Terminal panel, with more than one
+Dolphin window, or with RememberOpenedTabs off. Hyprland only.
+"""
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+config_home = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+
+
+def hyprctl(*args: str):
+    result = subprocess.run(["hyprctl", "-j", *args], capture_output=True, text=True, timeout=5)
+    return json.loads(result.stdout) if result.returncode == 0 and result.stdout.strip() else None
+
+
+def keep_running(reason: str) -> None:
+    print(f"Caelestia KDE sync: Dolphin not restarted, {reason}; it refreshed in place.", file=sys.stderr)
+    sys.exit(0)
+
+
+windows = [c for c in hyprctl("clients") or [] if c.get("class") == "org.kde.dolphin"]
+if not windows:
+    sys.exit(0)
+# KIO's progress windows ("Progress Dialog", then "Copying (35% of 3 files)",
+# "Moving", "Deleting" and so on) and its "File Already Exists" questions
+# belong to Dolphin; quitting would cancel the operation.
+busy = re.compile(r"^(Progress|Copying|Moving|Deleting|Transferring|Renaming)\b|Already Exists")
+if any(busy.search(c.get("title", "")) for c in windows):
+    keep_running("a file operation is running")
+# Dolphin restores the window that closed last, so a second window would be lost.
+if len(windows) > 1:
+    keep_running("more than one Dolphin window is open")
+window = windows[0]
+pid = window["pid"]
+
+# RememberOpenedTabs (Dolphin's default is true) is what brings the folders
+# and tabs back; without it a restart would lose them.
+remember = "true"
+group = None
+for line in (config_home / "dolphinrc").read_text(errors="replace").splitlines() if (config_home / "dolphinrc").is_file() else []:
+    line = line.strip()
+    if line.startswith("["):
+        group = line
+    elif group == "[General]" and line.split("=", 1)[0].strip() == "RememberOpenedTabs":
+        remember = line.split("=", 1)[1].strip()
+if remember != "true":
+    keep_running("RememberOpenedTabs is off")
+
+# A program running in the Terminal panel makes Dolphin ask before closing.
+# Konsole's test: the terminal's foreground process group is not the shell's.
+shells = {"sh", "bash", "zsh", "fish", "dash", "ksh", "mksh", "tcsh", "csh", "nu", "elvish", "xonsh"}
+for entry in os.listdir("/proc"):
+    if not entry.isdigit():
+        continue
+    try:
+        raw = Path(f"/proc/{entry}/stat").read_text()
+    except OSError:
+        continue
+    name = raw[raw.find("(") + 1 : raw.rfind(")")]
+    fields = raw[raw.rfind(")") + 2 :].split()  # state, ppid, pgrp, session, tty_nr, tpgid, ...
+    ppid, pgrp, tpgid = int(fields[1]), int(fields[2]), int(fields[5])
+    if ppid == pid and name in shells and tpgid > 0 and tpgid != pgrp:
+        keep_running("a program is running in its Terminal panel")
+
+# How it was: its workspace, its place and size when floating, and focus.
+# Hyprland lists a normal workspace with its id, a special one by name only.
+rules = {}
+ws = window.get("workspace") or {}
+ws_name = str(ws.get("name") or "")
+if ws.get("type") == "special" or ws_name.startswith("special:"):
+    rules["workspace"] = f"{ws_name} silent"
+elif isinstance(ws.get("id"), int) and ws["id"] > 0:
+    rules["workspace"] = f"{ws['id']} silent"
+elif ws_name:
+    rules["workspace"] = f"name:{ws_name} silent"
+try:
+    if window.get("floating") and not window.get("fullscreen"):
+        monitor = next((m for m in hyprctl("monitors") or [] if m.get("id") == window.get("monitor")), {"x": 0, "y": 0})
+        rules["move"] = [str(int(window["at"][0] - monitor["x"])), str(int(window["at"][1] - monitor["y"]))]
+        rules["size"] = [str(int(v)) for v in window["size"]]
+    if (hyprctl("activewindow") or {}).get("address") != window.get("address"):
+        rules["no_initial_focus"] = True
+except (KeyError, IndexError, TypeError, ValueError, subprocess.SubprocessError):
+    pass  # it reopens like Super+E opens it
+
+# Dolphin saves its session 22 s after a folder or tab change, and on closing
+# when such a save is pending. A window that has not changed since it started
+# never saved one: it shows what its command line opened (on top of the last
+# session), so the new Dolphin gets the same folders.
+session = config_home / "session/dolphin_dolphin_dolphin"
+try:
+    argv = Path(f"/proc/{pid}/cmdline").read_bytes().decode().split("\0")[1:-1]
+    ticks = int(Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[19])
+    boot = next(float(line.split()[1]) for line in Path("/proc/stat").read_text().splitlines() if line.startswith("btime "))
+    started = boot + ticks / os.sysconf("SC_CLK_TCK")
+except (OSError, ValueError, IndexError, StopIteration):
+    argv, started = [], 0.0
+argv = [arg for arg in argv if arg != "--daemon"]
+
+# Quit the way kquitapp6 does, so Dolphin closes its window normally and
+# saves its session, then wait for it to exit: a new Dolphin restores the
+# session only when it is the only one running.
+# The reply may not come: Dolphin can exit before sending it.
+quit_call = subprocess.run(
+    ["dbus-send", "--session", "--print-reply", "--reply-timeout=2000", f"--dest=org.kde.dolphin-{pid}",
+     "/MainApplication", "org.qtproject.Qt.QCoreApplication.quit"],
+    capture_output=True, text=True,
+)
+if re.search(r"ServiceUnknown|UnknownObject|UnknownMethod|NameHasNoOwner", quit_call.stderr):
+    keep_running("it did not answer on D-Bus")
+deadline = time.monotonic() + 5
+while os.path.exists(f"/proc/{pid}") and time.monotonic() < deadline:
+    time.sleep(0.05)
+if os.path.exists(f"/proc/{pid}"):
+    keep_running("it did not close within 5 s")
+
+
+def lua(value) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, list):
+        return "{ " + ", ".join(lua(v) for v in value) + " }"
+    if any(ord(ch) < 32 for ch in value):
+        raise ValueError(f"unexpected control character in {value!r}")
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+# Through Hyprland, like Super+E, so it gets its own app scope; the rule table
+# puts it back where it was.
+launch = "uwsm app -- dolphin" if shutil.which("uwsm") else "dolphin"
+try:
+    unchanged = session.stat().st_mtime < started
+except OSError:
+    unchanged = True
+if unchanged and argv:
+    launch += " " + shlex.join(argv)
+plain = f"hl.exec_cmd({lua(launch)})"
+try:
+    table = ", ".join(f"{key} = {lua(value)}" for key, value in rules.items())
+    attempts = [f"hl.exec_cmd({lua(launch)}, {{ {table} }})", plain] if rules else [plain]
+except ValueError:
+    attempts = [plain]
+for code in attempts:
+    try:
+        result = subprocess.run(["hyprctl", "eval", code], capture_output=True, text=True, timeout=5)
+    except subprocess.TimeoutExpired:
+        continue
+    if result.stdout.strip() == "ok":  # anything else is Hyprland's error message
+        break
