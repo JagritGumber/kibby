@@ -25,6 +25,10 @@ Kibby is licensed under the GNU General Public License, version 3 (see `LICENSE`
 
 Both were reimplemented from that description for Kibby's own shaders; no code was copied from either project.
 
+## Adapted, with notice
+
+- app-volumes' `formKey` follows `formKey` in WirePlumber's `scripts/node/state-stream.lua` (Copyright © 2021-2022 Collabora Ltd., MIT), so that the script reads each app's volume under the key WirePlumber stores it by.
+
 ## Used, not included
 
 - [Quickshell](https://quickshell.org), [caelestia-cli](https://github.com/caelestia-dots/cli) and the Caelestia shell plugin, installed from the AUR.
