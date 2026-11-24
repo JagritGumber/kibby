@@ -1,26 +1,36 @@
--- Kibby: an app's remembered volume survives the app's own volume at start.
+-- Kibby: each app keeps the volume set for it in a mixer, even when the app
+-- sets its own.
 --
 -- WirePlumber's node/state-stream.lua remembers each app's stream volume and
--- puts it back when a new stream of that app appears. A PulseAudio client that
--- asks for a volume when it creates its stream gets that volume applied by
--- pipewire-pulse a moment later, once the stream's format is settled. Spotify
--- does this for every track, at its own 100 %. So the restore is lost, and the
--- app's volume is then remembered in place of the one set in the mixer.
+-- puts it back when a new stream of that app appears. Some apps then set
+-- their own volume over it, and that is remembered instead:
+-- - A PulseAudio client that asks for a volume when it creates its stream gets
+--   it applied by pipewire-pulse a moment after WirePlumber's restore, once the
+--   stream's format is settled. Spotify does this, at its own 100 %.
+-- - Spotify 1.2.63 and later is reported to set its own volume again on its
+--   stream when playback resumes or a track changes, ignoring the mixer.
 --
--- For GUARD_SECONDS after a stream with a remembered volume appears, a change
--- away from that volume is taken as the app's start-up override. It is not
--- remembered (this hook runs before node/store-stream-props and stops the
--- event), and the remembered volume is put back. Changes after that, from the
--- mixer or from the app itself, are kept and remembered as usual.
+-- So for WINDOW_MS after such a moment (the stream appears with a remembered
+-- volume, starts running again, is uncorked, or changes its media name), a
+-- change away from the volume the stream had is taken as the app's own. It is
+-- not remembered (this hook runs before node/store-stream-props and stops the
+-- event), and the stream's volume is put back, once per change. Changes at any
+-- other time, from a mixer or from the app, are kept and remembered as usual.
 
 cutils = require ("common-utils")
 log = Log.open_topic ("s-kibby-app-volume-guard")
 
-GUARD_SECONDS = 2
+-- An app sets its own volume within milliseconds of the moment (0.1 to 22 ms
+-- in the test rig); a person at a mixer takes longer than a second.
+WINDOW_MS = 1000
 MAX_RESETS = 3
 
 local state = State ("stream-properties")
 local guards = {}
+
+local function nowMs ()
+  return GLib.get_monotonic_time () // 1000
+end
 
 -- The key node/state-stream.lua stores the stream under. Adapted from
 -- formKey in WirePlumber's scripts/node/state-stream.lua
@@ -48,43 +58,84 @@ local function storedVolumes (key)
   if stored.volume == nil and stored.channelVolumes == nil then
     return nil
   end
-  return stored
+  return { volume = stored.volume, channelVolumes = stored.channelVolumes }
+end
+
+local function volumesOf (props)
+  if props.volume == nil and props.channelVolumes == nil then
+    return nil
+  end
+  local copy = props.channelVolumes and {} or nil
+  for i, v in ipairs (props.channelVolumes or {}) do
+    copy [i] = v
+  end
+  return { volume = props.volume, channelVolumes = copy }
 end
 
 local function close (a, b)
   return a ~= nil and b ~= nil and math.abs (a - b) < 0.001
 end
 
-local function sameVolumes (props, stored)
-  if stored.channelVolumes and props.channelVolumes then
-    if #stored.channelVolumes ~= #props.channelVolumes then
+local function sameVolumes (a, b)
+  if a.channelVolumes and b.channelVolumes then
+    if #a.channelVolumes ~= #b.channelVolumes then
       return false
     end
-    for i, v in ipairs (stored.channelVolumes) do
-      if not close (v, props.channelVolumes [i]) then
+    for i, v in ipairs (a.channelVolumes) do
+      if not close (v, b.channelVolumes [i]) then
         return false
       end
     end
   end
-  if stored.volume ~= nil and props.volume ~= nil and not close (stored.volume, props.volume) then
+  if a.volume ~= nil and b.volume ~= nil and not close (a.volume, b.volume) then
     return false
   end
   return true
 end
 
-local function putBack (node, stored)
-  local props = { "Spa:Pod:Object:Param:Props", "Props", volume = stored.volume }
-  if stored.channelVolumes then
-    local volumes = { "Spa:Float" }
-    for _, v in ipairs (stored.channelVolumes) do
-      table.insert (volumes, v)
+local function describe (volumes)
+  return volumes.channelVolumes and table.concat (volumes.channelVolumes, ",") or tostring (volumes.volume)
+end
+
+local function putBack (node, volumes)
+  local props = { "Spa:Pod:Object:Param:Props", "Props", volume = volumes.volume }
+  if volumes.channelVolumes then
+    local list = { "Spa:Float" }
+    for _, v in ipairs (volumes.channelVolumes) do
+      table.insert (list, v)
     end
-    props.channelVolumes = Pod.Array (volumes)
+    props.channelVolumes = Pod.Array (list)
   end
   node:set_param ("Props", Pod.Object (props))
 end
 
--- A new stream: watch it for a moment if its app has a remembered volume.
+local function arm (guard, why)
+  if guard.current then
+    guard.windowUntil = nowMs () + WINDOW_MS
+    guard.resets = 0
+    log:debug (string.format ("%s: guarding its volume for %d ms (%s)", guard.key, WINDOW_MS, why))
+  end
+end
+
+-- An uncork or a new media name: moments an app may set its own volume again.
+local function checkCues (guard, node)
+  local properties = node.properties
+  local corked = properties ["pulse.corked"] == "true"
+  local mediaName = properties ["media.name"]
+  if guard.corked and not corked then
+    arm (guard, "uncorked")
+  elseif mediaName ~= guard.mediaName then
+    arm (guard, "media name changed")
+  end
+  guard.corked, guard.mediaName = corked, mediaName
+end
+
+local function restoring (properties)
+  return Settings.get_boolean ("node.stream.restore-props") and properties ["state.restore-props"] ~= "false"
+end
+
+-- A new stream: track its volume, and guard it now if its app has one
+-- remembered.
 SimpleEventHook {
   name = "node/kibby-app-volume-guard-watch",
   interests = {
@@ -96,24 +147,24 @@ SimpleEventHook {
   execute = function (event)
     local node = event:get_subject ()
     local properties = node.properties
-    -- Nothing was restored, so there is nothing to keep.
-    if not Settings.get_boolean ("node.stream.restore-props") or properties ["state.restore-props"] == "false" then
+    if not restoring (properties) then
       return
     end
     local key = formKey (properties)
-    local stored = key and storedVolumes (key)
-    if not stored then
+    if not key then
       return
     end
-    local id = node ["bound-id"]
-    local guard = { key = key, stored = stored, resets = 0, pending = false }
-    guards [id] = guard
-    Core.timeout_add (GUARD_SECONDS * 1000, function ()
-      if guards [id] == guard then
-        guards [id] = nil
-      end
-      return false
-    end)
+    local guard = {
+      key = key,
+      current = storedVolumes (key),
+      windowUntil = 0,
+      resets = 0,
+      pending = false,
+      corked = properties ["pulse.corked"] == "true",
+      mediaName = properties ["media.name"],
+    }
+    guards [node ["bound-id"]] = guard
+    arm (guard, "new stream")
   end
 }:register ()
 
@@ -131,10 +182,33 @@ SimpleEventHook {
   end
 }:register ()
 
--- Its volume changed: within the guard time, a change away from the
--- remembered volume is the app's override. It is never remembered, and it is
--- put back once per override (the node reports the app's volume until the
--- put-back lands).
+-- Running again after idling (a resume) is a cue too.
+SimpleEventHook {
+  name = "node/kibby-app-volume-guard-state",
+  interests = {
+    EventInterest {
+      Constraint { "event.type", "=", "node-state-changed" },
+      Constraint { "media.class", "matches", "Stream/*" },
+    },
+  },
+  execute = function (event)
+    local node = event:get_subject ()
+    local guard = guards [node ["bound-id"]]
+    if not guard then
+      return
+    end
+    local props = event:get_properties ()
+    if props ["event.subject.new-state"] == "running" and props ["event.subject.old-state"] ~= "running" then
+      arm (guard, "running again")
+    end
+    checkCues (guard, node)
+  end
+}:register ()
+
+-- Its volume changed. Inside a window, a change away from the stream's
+-- volume is the app's own: it is never remembered, and the volume is put back
+-- once per change (the node reports the app's volume until the put-back
+-- lands). Outside a window, the change is the stream's new volume.
 SimpleEventHook {
   name = "node/kibby-app-volume-guard",
   before = "node/store-stream-props",
@@ -147,30 +221,33 @@ SimpleEventHook {
   },
   execute = function (event)
     local node = event:get_subject ()
-    local id = node ["bound-id"]
-    local guard = guards [id]
+    local guard = guards [node ["bound-id"]]
     if not guard then
       return
     end
     if formKey (node.properties) ~= guard.key then
-      guards [id] = nil
+      guards [node ["bound-id"]] = nil
       return
     end
+    checkCues (guard, node)
     for p in node:iterate_params ("Props") do
-      local props = cutils.parseParam (p, "Props")
-      if props then
-        if sameVolumes (props, guard.stored) then
+      local volumes = volumesOf (cutils.parseParam (p, "Props") or {})
+      if volumes then
+        if not guard.current or sameVolumes (volumes, guard.current) then
+          guard.current = guard.current or volumes
           guard.pending = false
-        else
+        elseif nowMs () < guard.windowUntil then
           event:stop_processing ()
           if not guard.pending and guard.resets < MAX_RESETS then
             guard.resets = guard.resets + 1
             guard.pending = true
-            log:info (node, string.format ("%s set its own volume at start (%s); putting back the remembered one (%s)",
-                guard.key, props.channelVolumes and table.concat (props.channelVolumes, ",") or tostring (props.volume),
-                guard.stored.channelVolumes and table.concat (guard.stored.channelVolumes, ",") or tostring (guard.stored.volume)))
-            putBack (node, guard.stored)
+            log:info (node, string.format ("%s set its own volume (%s); putting back %s",
+                guard.key, describe (volumes), describe (guard.current)))
+            putBack (node, guard.current)
           end
+        else
+          guard.current = volumes
+          guard.pending = false
         end
       end
       break

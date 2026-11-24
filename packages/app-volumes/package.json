@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "kind": "component",
   "license": "GPL-3.0-or-later",
-  "description": "A WirePlumber 0.5 script that keeps each app's remembered volume when the app sets its own as it starts a stream, as Spotify does at 100% on every track. A volume set in the mixer then holds across tracks and restarts.",
+  "description": "A WirePlumber 0.5 script that keeps each app's volume from the mixer when the app sets its own: as it opens a stream, resumes, or moves to the next item. Spotify sets its own 100% again on every track. A volume set in the mixer then holds across tracks and restarts.",
   "dependencies": [],
   "notes": [
     "WirePlumber loads the app-volumes script when it next starts: systemctl --user restart wireplumber (sound stops for about a second)."

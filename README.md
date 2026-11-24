@@ -16,7 +16,7 @@ It runs on Arch Linux and CachyOS, with Hyprland 0.57 or newer (the Lua config).
 | `tray-standin` | A kded module, so the system tray works without Plasma. Built from source. |
 | `wispr-glow` | While you dictate with Wispr Flow, the screen edges glow in the wallpaper's colours and ripple with your voice, and bars along the bottom edge move with each word. Errors turn the glow red. Wispr's own bar stays hidden. See [Wispr glow](#wispr-glow) below. |
 | `desktop-scripts` | The helpers the binds call: mic mute, touchpad state, screen OCR, the recorder, the sleep hook, and clipboard history. |
-| `app-volumes` | Each app keeps the volume you set for it, even when it sets its own at start: Spotify resets itself to 100% on every track. A WirePlumber script. |
+| `app-volumes` | Each app keeps the volume you set for it in a mixer, even when it sets its own: Spotify sets itself back to 100% on every track. A WirePlumber script. |
 | `mic-mute-led` | Keeps a laptop's mic-mute LED in step with PipeWire. |
 | `appimage-icons` | Shows each AppImage's real icon in Dolphin. |
 | `helium` | Workarounds for the Helium browser around sleep. |
