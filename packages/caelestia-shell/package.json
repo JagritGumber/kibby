@@ -12,7 +12,7 @@
       "name": "JagritGumber/caelestia-shell",
       "url": "https://github.com/JagritGumber/caelestia-shell.git",
       "ref": "kibby",
-      "commit": "a291441819ae5a215ec552d984c73056495c014a",
+      "commit": "47ee3936adb1c5de4c9baacf3cfa612cb9a5adf2",
       "license": "GPL-3.0 (a fork of caelestia-dots/shell v2.5.0; see KIBBY.md in the fork)",
       "mode": "checkout",
       "dest": ".config/quickshell/caelestia"
