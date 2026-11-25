@@ -9,7 +9,7 @@ It runs on Arch Linux and CachyOS, with Hyprland 0.57 or newer (the Lua config).
 | Package | What it does |
 | --- | --- |
 | `hyprland` | Hyprland in Lua. The base is CachyOS's Hyprland template, fetched at a pinned commit. On top of it: number keys go to workspaces, a scratchpad toggle, the monitor rule from settings, the touchpad key, an empty wallpaper workspace, and the Caelestia bridge (launcher, sidebar, lock, OSD keys, OCR and translate, the colour picker). |
-| `caelestia-shell` | Caelestia from Kibby's fork, [JagritGumber/caelestia-shell](https://github.com/JagritGumber/caelestia-shell): upstream v2.5.0 plus touchpad-lock and mic-mute feedback, each window's own app icon in the bar, tray fixes, system alerts, the profile picture cropper, and notification, lock, launcher and recorder changes. |
+| `caelestia-shell` | Caelestia from Kibby's fork, [JagritGumber/caelestia-shell](https://github.com/JagritGumber/caelestia-shell): upstream v2.5.0 plus touchpad-lock and mic-mute feedback, each window's own app icon in the bar, tray fixes, system alerts, the profile picture cropper, per-app volume in the OSD on demand (rest the pointer on the volume pill, or on the mic pill while an app records, or right-click either; output and input switching), the notification dock for Junco's work items (see [Notification dock](#notification-dock) below), and notification, lock, launcher and recorder changes. |
 | `caelestia-config` | Caelestia's `shell.json` and `cli.json`, and the Dolphin stylesheet template. |
 | `theme-sync` | Runs once at install and after every wallpaper change. It sets Dolphin's Material style and the caelestia-folders icons, and recolours KDE/Qt apps, GTK apps and the Papirus folders from the wallpaper's palette. |
 | `material-dolphin` | A Qt style plugin over Darkly. It gives Dolphin and the KDE file dialog Caelestia's Material look. Built from source. |
@@ -75,6 +75,21 @@ The glow is drawn on the GPU: the edge gradients and the voice ribbons are shade
 - **The bars themselves.** `KIBBY_WISPR_BARS` turns them on or off. `KIBBY_WISPR_BAR_COUNT` sets how many go across the screen (0 means the look's own count), and `KIBBY_WISPR_BAR_MAX_HEIGHT` sets their height at full voice.
 - **The voice.** `KIBBY_WISPR_INPUT_GAIN=0` sets the gain automatically from your mic. If soft words barely move the glow, lower `KIBBY_WISPR_GATE_DB` from 14 (10 suits a quiet headset); if it moves while you are silent, raise it.
 - **The shaders.** At install, Kibby builds each shader with your system's `qsb` (from `qt6-shadertools`), so they match your Qt. Without `qsb`, it uses the packs shipped in `packages/wispr-glow/prebuilt`, built with Qt 6.12.0. Those may not load on an older Qt, and the installer's next steps say so.
+
+## Notification dock
+
+The Caelestia shell from Kibby's fork has a dock for the work Junco, the mail app, finds in your mail: a CI run to re-run, a sign-in to confirm, a review, a comment to answer, an invitation, a bill. Normal notifications still come as Caelestia's popups.
+
+- **Where it is.** While there is work, a thin line in the wallpaper's accent colour shows in the bottom border, in the bottom-left corner beside the bar. Rest the pointer on the edge under it (50 ms) and the sheet comes up; move away and it goes, as the dashboard does. You can also bind the global shortcut `caelestia:notifDock`, or run `qs -c caelestia ipc call drawers toggle notifDock`.
+- **What it shows.** A Material 3 list-detail sheet: a tab per source with its count, search, and a filter for what needs you (Actions) or is only news (Updates); the list; and one item's detail, with its own buttons pinned at the bottom and the rest scrolling. **Later** sends an item to the back of the list; **Mark read** marks its mail read in Junco and lets it go. After a click on the sheet, ↑ and ↓ move through the list, ← is Later, and → or R is Mark read.
+- **How Junco feeds it.** Junco writes its items to `${XDG_STATE_HOME:-~/.local/state}/courier/dock.json` (version 3, written atomically), and the dock only reads that file. Each item names one component from a fixed set (decision, status, review, comment, scheduling, table, timeline, summary) and fills that component's sections; the dock draws it in the wallpaper's colours. Buttons run `courier-notify action <id> <action-id>` (a reply's text on stdin); links open only through `xdg-open`, and only http(s). While the dock runs it rewrites `${XDG_STATE_HOME}/caelestia/notifdock.alive` every 30 s; when that is older than 90 s, Junco falls back to desktop notifications. Without Junco, the dock stays hidden.
+- **Settings**, under `"notifs"` in `~/.config/caelestia/shell.json`:
+  - `"dock": false` turns it off.
+  - `"dockRevealDelay"`: how long the pointer rests on the edge first, in ms (50).
+  - `"dockScale"`: its size, from 0.6 to 1.6; 1 is 990 × 480 px.
+  - `"dockLayout": "deck"` shows one card at a time instead of the sheet.
+
+  Caelestia's plugin doesn't know these keys, so any you set are listed among its config issues; they still apply.
 
 ## Settings
 
