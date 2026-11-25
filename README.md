@@ -9,13 +9,14 @@ It runs on Arch Linux and CachyOS, with Hyprland 0.57 or newer (the Lua config).
 | Package | What it does |
 | --- | --- |
 | `hyprland` | Hyprland in Lua. The base is CachyOS's Hyprland template, fetched at a pinned commit. On top of it: number keys go to workspaces, a scratchpad toggle, the monitor rule from settings, the touchpad key, an empty wallpaper workspace, Dolphin opening at two thirds of the screen, and the Caelestia bridge (launcher, sidebar, lock, OSD keys, OCR and translate, the colour picker). |
-| `caelestia-shell` | Caelestia from Kibby's fork, [JagritGumber/caelestia-shell](https://github.com/JagritGumber/caelestia-shell): upstream v2.5.0 plus touchpad-lock and mic-mute feedback, each window's own app icon in the bar, tray fixes, system alerts, the profile picture cropper, and notification, lock, launcher and recorder changes. |
+| `caelestia-shell` | Caelestia from Kibby's fork, [JagritGumber/caelestia-shell](https://github.com/JagritGumber/caelestia-shell): upstream v2.5.0 plus touchpad-lock and mic-mute feedback, each window's own app icon in the bar, tray fixes, system alerts, the profile picture cropper, per-app volume in the OSD on demand (rest the pointer on the volume pill, or on the mic pill while an app records, or right-click either; output and input switching), and notification, lock, launcher and recorder changes. |
 | `caelestia-config` | Caelestia's `shell.json` and `cli.json`, and the Dolphin stylesheet template. |
 | `theme-sync` | Runs once at install and after every wallpaper change. It sets Dolphin's Material style and the caelestia-folders icons, and recolours KDE/Qt apps, GTK apps and the Papirus folders from the wallpaper's palette. After a wallpaper change it restarts an open Dolphin, which comes back with its tabs. |
 | `material-dolphin` | A Qt style plugin over Darkly. It gives Dolphin and the KDE file dialog Caelestia's Material look. Built from source. |
 | `tray-standin` | A kded module, so the system tray works without Plasma. Built from source. |
 | `wispr-glow` | While you dictate with Wispr Flow, the screen edges glow in the wallpaper's colours and ripple with your voice, and bars along the bottom edge move with each word. Errors turn the glow red. Wispr's own bar stays hidden. See [Wispr glow](#wispr-glow) below. |
 | `desktop-scripts` | The helpers the binds call: mic mute, touchpad state, screen OCR, the recorder, the sleep hook, and clipboard history. |
+| `app-volumes` | Each app keeps the volume you set for it in a mixer, even when it sets its own: Spotify sets itself back to 100% on every track. A WirePlumber script. |
 | `mic-mute-led` | Keeps a laptop's mic-mute LED in step with PipeWire. |
 | `appimage-icons` | Shows each AppImage's real icon in Dolphin. |
 | `helium` | Workarounds for the Helium browser around sleep. |

@@ -10,7 +10,8 @@
             "inverted": true
         },
         "scrollActions": {
-            "workspaces": true
+            "workspaces": true,
+            "brightness": false
         },
         "statusIcons": [
             {

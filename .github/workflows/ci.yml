@@ -58,7 +58,7 @@ jobs:
           if grep -rIl --exclude-dir=.git -E '\{\{(HOME|KIBBY_[A-Z0-9_]+)\}\}' "$home/.config" "$home/.local"; then
             echo "placeholders were left unrendered"; exit 1
           fi
-          find "$home/.config/hypr" -name '*.lua' -exec luac5.4 -p {} +
+          find "$home/.config/hypr" "$home/.local/share/wireplumber" -name '*.lua' -exec luac5.4 -p {} +
           for name in edgeglow.frag ribbon.vert ribbon.frag bottombars.vert bottombars.frag; do
             test -s "$home/.config/quickshell/wispr-glow/$name.qsb"
           done
