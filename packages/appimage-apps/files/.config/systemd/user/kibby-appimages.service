@@ -1,0 +1,14 @@
+[Unit]
+Description=Register the AppImages in ~/Applications as launcher apps
+Documentation=file://%h/.local/bin/kibby-appimages
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/kibby-appimages sync
+# It never needs the session's display (kiconfinder6 is a Qt GUI program).
+UnsetEnvironment=WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE
+Environment=QT_QPA_PLATFORM=offscreen
+Nice=10
+
+[Install]
+WantedBy=default.target
