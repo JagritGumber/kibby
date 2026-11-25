@@ -28,6 +28,24 @@ hl.window_rule({
     center = true,
 })
 
+-- Dolphin opens at two thirds of the screen, 1280x760 on 1920x1080.
+-- CachyOS's windowrules.lua floats Dolphin, sizes it and places it under the
+-- cursor. This rule loads after it and replaces only the size; Hyprland sizes
+-- a window before it places it, so the placement uses this size. Dolphin's
+-- dialogs (copy progress, properties and the like) keep their own size.
+local dolphinDialogs = {
+    "Moving", "Create New", "Extract", "Compress", "Copying", "Progress",
+    "Configure", "Properties", "Choose Application",
+}
+hl.window_rule({
+    name = "kibby-dolphin-size",
+    match = {
+        class = "^(org\\.kde\\.dolphin)$",
+        title = "negative:^(" .. table.concat(dolphinDialogs, "|") .. ").*$",
+    },
+    size = { "monitor_w*0.667", "monitor_h*0.704" },
+})
+
 KIBBY = KIBBY or {}
 KIBBY.touchpadEnabled = KIBBY.touchpadEnabled ~= false
 KIBBY.wallpaperWorkspaceName = "kibby-wallpaper"
