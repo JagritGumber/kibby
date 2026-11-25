@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "id": "hyprland",
   "name": "Kibby Hyprland",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "kind": "overlay",
   "license": "GPL-3.0-or-later",
   "description": "Hyprland in Lua: CachyOS's Hyprland template, fetched at a pinned commit, with Kibby's binds, monitor rule, host helpers and the Caelestia bridge loaded on top.",

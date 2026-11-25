@@ -8,10 +8,10 @@ It runs on Arch Linux and CachyOS, with Hyprland 0.57 or newer (the Lua config).
 
 | Package | What it does |
 | --- | --- |
-| `hyprland` | Hyprland in Lua. The base is CachyOS's Hyprland template, fetched at a pinned commit. On top of it: number keys go to workspaces, a scratchpad toggle, the monitor rule from settings, the touchpad key, an empty wallpaper workspace, and the Caelestia bridge (launcher, sidebar, lock, OSD keys, OCR and translate, the colour picker). |
+| `hyprland` | Hyprland in Lua. The base is CachyOS's Hyprland template, fetched at a pinned commit. On top of it: number keys go to workspaces, a scratchpad toggle, the monitor rule from settings, the touchpad key, an empty wallpaper workspace, Dolphin opening at two thirds of the screen, and the Caelestia bridge (launcher, sidebar, lock, OSD keys, OCR and translate, the colour picker). |
 | `caelestia-shell` | Caelestia from Kibby's fork, [JagritGumber/caelestia-shell](https://github.com/JagritGumber/caelestia-shell): upstream v2.5.0 plus touchpad-lock and mic-mute feedback, each window's own app icon in the bar, tray fixes, system alerts, the profile picture cropper, and notification, lock, launcher and recorder changes. |
 | `caelestia-config` | Caelestia's `shell.json` and `cli.json`, and the Dolphin stylesheet template. |
-| `theme-sync` | Runs once at install and after every wallpaper change. It sets Dolphin's Material style and the caelestia-folders icons, and recolours KDE/Qt apps, GTK apps and the Papirus folders from the wallpaper's palette. |
+| `theme-sync` | Runs once at install and after every wallpaper change. It sets Dolphin's Material style and the caelestia-folders icons, and recolours KDE/Qt apps, GTK apps and the Papirus folders from the wallpaper's palette. After a wallpaper change it restarts an open Dolphin, which comes back with its tabs. |
 | `material-dolphin` | A Qt style plugin over Darkly. It gives Dolphin and the KDE file dialog Caelestia's Material look. Built from source. |
 | `tray-standin` | A kded module, so the system tray works without Plasma. Built from source. |
 | `wispr-glow` | While you dictate with Wispr Flow, the screen edges glow in the wallpaper's colours and ripple with your voice, and bars along the bottom edge move with each word. Errors turn the glow red. Wispr's own bar stays hidden. See [Wispr glow](#wispr-glow) below. |
@@ -59,7 +59,13 @@ Dolphin gets two things from Kibby:
 
 **At install:** `./install` runs `caelestia-sync-kde-theme` once. It sets Dolphin's style to `caelestia` and its icon theme to `caelestia-folders`, for Qt and GTK apps too. It also builds caelestia-folders, but with Papirus's own blue folders, because Caelestia has no wallpaper colours yet. Dolphin picks this up the next time it starts in a Kibby session. The session is what lets Qt find the style, in `~/.local/lib/qt6/plugins`.
 
-**At every wallpaper change:** Caelestia runs the same script after it makes the new colours. The script recolours KDE and GTK apps and the folder icons, and running apps reload them. So the folders stay Papirus blue only until you first pick a wallpaper; the installer's next steps say so.
+**At every wallpaper change:** Caelestia runs the same script after it makes the new colours. So the folders stay Papirus blue only until you first pick a wallpaper; the installer's next steps say so.
+
+- The script recolours KDE and GTK apps and the folder icons, and running apps repaint in the new colours.
+- Then it restarts an open Dolphin, which comes back on its workspace with its tabs and folders. Dolphin keeps the previews of folders that show their contents in memory, so only a restart redraws them in the new colours.
+  - Dolphin is left running, and refreshes in place, while it copies or moves files, while a program runs in its terminal, or with more than one Dolphin window open.
+  - `KIBBY_THEME_RESTART_DOLPHIN=false` always refreshes in place.
+- Each recoloured folder set is cached by palette, so going back to a wallpaper used before is instant.
 
 ## Wispr glow
 
@@ -80,6 +86,7 @@ The glow is drawn on the GPU: the edge gradients and the voice ribbons are shade
 
 `~/.config/kibby/settings.env` holds everything that differs per machine or person:
 - browser
+- whether an open Dolphin restarts after a wallpaper change
 - monitor and scale
 - numlock
 - touchpad device
