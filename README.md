@@ -25,6 +25,8 @@ It runs on Arch Linux and CachyOS, with Hyprland 0.57 or newer (the Lua config).
 
 `./install --list` shows the packages with their versions.
 
+**Courier, the mail app.** [Courier](https://github.com/JagritGumber/courier) is a mail client for Linux that feels like part of your desktop. It lives in its own repository, with its own install steps.
+
 ## Install
 
 ```sh
