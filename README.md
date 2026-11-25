@@ -18,6 +18,7 @@ It runs on Arch Linux and CachyOS, with Hyprland 0.57 or newer (the Lua config).
 | `desktop-scripts` | The helpers the binds call: mic mute, touchpad state, screen OCR, the recorder, the sleep hook, and clipboard history. |
 | `mic-mute-led` | Keeps a laptop's mic-mute LED in step with PipeWire. |
 | `appimage-icons` | Shows each AppImage's real icon in Dolphin. |
+| `appimage-apps` | Lists the AppImages in `~/Applications` in the launcher. It writes an entry for each, with its own icon, without ever running it; repairs the entries some AppImages register from their temporary mount; and removes them when the AppImage goes. |
 | `helium` | Workarounds for the Helium browser around sleep. |
 | `terminal` | kitty, Alacritty, fish, fuzzel, Helix and micro settings. |
 | `session` | The uwsm environment and the portal choices. |

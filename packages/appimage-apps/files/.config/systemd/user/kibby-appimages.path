@@ -1,0 +1,14 @@
+[Unit]
+Description=Watch ~/Applications and the applications folder for AppImage changes
+
+[Path]
+# An AppImage added, removed, renamed or made executable in ~/Applications, and
+# an entry written in ~/.local/share/applications (AnymeX rewrites its own with
+# a dead mount path; in-place edits need a launcher rescan). Dotfiles are
+# ignored, so the registrar's own temp files and rescan pokes don't loop.
+PathChanged=%h/Applications
+PathChanged=%h/.local/share/applications
+Unit=kibby-appimages.service
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 2,
+  "id": "appimage-apps",
+  "name": "AppImage apps",
+  "version": "0.1.0",
+  "kind": "component",
+  "license": "GPL-3.0-or-later",
+  "description": "Lists the AppImages in ~/Applications in the launcher: writes a desktop entry for each (its icon extracted, the AppImage never run), repairs entries an AppImage registered from its temporary mount, and removes them when the AppImage goes. Rerun by a user path unit whenever ~/Applications or ~/.local/share/applications changes.",
+  "dependencies": [],
+  "services": [
+    {
+      "unit": "kibby-appimages.path",
+      "wantedBy": "default.target"
+    }
+  ],
+  "system": {
+    "pacman": [
+      "python",
+      "libappimage",
+      "kiconthemes"
+    ],
+    "aur": []
+  }
+}

@@ -1,0 +1,663 @@
+#!/usr/bin/env python3
+"""kibby-appimages: register the AppImages in ~/Applications as desktop apps.
+
+Put an AppImage in ~/Applications and it shows up in the launcher (Super+Space),
+in "Open with" and for xdg-open; delete it and its entry goes. The
+kibby-appimages.path user unit runs this whenever ~/Applications or
+~/.local/share/applications changes, and Quickshell's own watcher on the
+applications folder updates the launcher live, without a shell restart.
+
+For each AppImage at the top level of ~/Applications:
+- If a visible entry already launches it (its Exec resolves to the file),
+  that is its registration and nothing is written. Orca and Grok Bot have
+  hand-made entries like this.
+- An entry the AppImage wrote for itself while running points its Exec into
+  its own temporary FUSE mount, /tmp/.mount_<first 6 characters of the file
+  name><6 random>. That path is gone once the app quits. Such an entry is
+  repaired in place: Exec and TryExec point at the AppImage, and Icon at the
+  icon extracted from it if its own icon name resolves to nothing. MimeType
+  and everything else stay. AnymeX registers its URL schemes this way.
+- Otherwise it gets an entry of its own, built from the .desktop file inside
+  the AppImage, named after that file's id so that window app-ids still match
+  (appimage-<id> if something else already has the id). Exec, TryExec and
+  Icon point at the AppImage and its extracted icon. An AppImage with no
+  .desktop inside gets a minimal entry named after the file.
+- X-AppImage-Integrate=false inside the AppImage opts it out.
+- An AppImage without its executable bit gets u+x.
+
+Entries this writes or repairs carry X-Kibby-AppImage=<path>. When that file is
+gone, written entries are deleted and repaired ones are moved to
+~/.local/state/kibby-appimages/backup/.
+
+Quickshell's watcher on the applications folders sees files being added,
+removed and renamed, but not an existing .desktop rewritten in place (its
+inotify mask has no MODIFY/CLOSE_WRITE), so such an edit stayed invisible to
+the launcher until some other change. The path unit does see those writes, so
+when an entry in ~/.local/share/applications is newer than at the last run,
+this creates and removes a dotfile there: one rescan, and systemd ignores
+dotfiles, so it cannot loop.
+
+Reading an AppImage never runs it: libappimage reads the squashfs inside.
+
+Usage: kibby-appimages [sync] [--dry-run] [-v]
+Env:   KIBBY_APPIMAGE_DIRS  colon-separated folders (default ~/Applications)
+"""
+
+import ctypes
+import fcntl
+import hashlib
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HOME = Path.home()
+DATA_HOME = Path(os.environ.get("XDG_DATA_HOME") or HOME / ".local/share")
+APPS = DATA_HOME / "applications"
+ICONS = DATA_HOME / "kibby-appimages" / "icons"
+STATE = Path(os.environ.get("XDG_STATE_HOME") or HOME / ".local/state") / "kibby-appimages"
+BACKUP = STATE / "backup"
+
+KEY = "X-Kibby-AppImage"
+STAMP = "X-Kibby-AppImage-Stamp"
+REPAIRED = "X-Kibby-AppImage-Repaired"
+FALLBACK_ICON = "application-x-executable"
+MOUNT = re.compile(r"^/tmp/\.mount_(.{6})[A-Za-z0-9]{6}/")
+
+DRY = "--dry-run" in sys.argv
+VERBOSE = "-v" in sys.argv
+
+
+def say(message: str) -> None:
+    print(message, flush=True)
+
+
+def debug(message: str) -> None:
+    if VERBOSE:
+        print(f"  . {message}", flush=True)
+
+
+# --- libappimage: read files inside an AppImage without running it -----------
+
+def load_libappimage():
+    try:
+        lib = ctypes.CDLL("libappimage.so.1.0")
+    except OSError:
+        sys.exit("kibby-appimages: needs libappimage (pacman -S libappimage)")
+    lib.appimage_get_type.argtypes = [ctypes.c_char_p, ctypes.c_bool]
+    lib.appimage_get_type.restype = ctypes.c_int
+    lib.appimage_list_files.argtypes = [ctypes.c_char_p]
+    lib.appimage_list_files.restype = ctypes.POINTER(ctypes.c_char_p)
+    lib.appimage_string_list_free.argtypes = [ctypes.POINTER(ctypes.c_char_p)]
+    lib.appimage_read_file_into_buffer_following_symlinks.argtypes = [
+        ctypes.c_char_p, ctypes.c_char_p, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_ulong)]
+    lib.appimage_read_file_into_buffer_following_symlinks.restype = ctypes.c_bool
+    lib.appimage_shall_not_be_integrated.argtypes = [ctypes.c_char_p]
+    lib.appimage_shall_not_be_integrated.restype = ctypes.c_bool
+    return lib
+
+
+LIB = None
+LIBC = ctypes.CDLL(None)
+LIBC.free.argtypes = [ctypes.c_void_p]
+
+
+class quiet_stderr:
+    """libappimage prints an ERROR line for every file it doesn't find, which
+    is the normal answer while looking for icons."""
+
+    def __enter__(self):
+        sys.stderr.flush()
+        self.saved = os.dup(2)
+        null = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(null, 2)
+        os.close(null)
+
+    def __exit__(self, *exc):
+        os.dup2(self.saved, 2)
+        os.close(self.saved)
+
+
+def ai_files(appimage: Path) -> list[str]:
+    with quiet_stderr():
+        listing = LIB.appimage_list_files(bytes(appimage))
+    found, index = [], 0
+    while listing and listing[index]:
+        found.append(listing[index].decode(errors="replace"))
+        index += 1
+    if listing:
+        LIB.appimage_string_list_free(listing)
+    return found
+
+
+def ai_read(appimage: Path, entry: str) -> bytes | None:
+    buffer, size = ctypes.c_void_p(), ctypes.c_ulong()
+    with quiet_stderr():
+        found = LIB.appimage_read_file_into_buffer_following_symlinks(
+            bytes(appimage), entry.encode(), ctypes.byref(buffer), ctypes.byref(size))
+    if not found:
+        return None
+    try:
+        return ctypes.string_at(buffer, size.value)
+    finally:
+        LIBC.free(buffer)
+
+
+# --- desktop entry text ---------------------------------------------------------
+
+def groups(text: str) -> dict[str, dict[str, str]]:
+    """{group: {key: value}} with only the unlocalised keys."""
+    out: dict[str, dict[str, str]] = {}
+    group = None
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("[") and line.endswith("]"):
+            group = line[1:-1]
+            out.setdefault(group, {})
+        elif group and "=" in line and not line.startswith("#"):
+            key, value = line.split("=", 1)
+            key = key.strip()
+            if "[" not in key:
+                out[group].setdefault(key, value.strip())
+    return out
+
+
+def unescape(value: str) -> str:
+    """Desktop-entry string escapes (\\s \\n \\t \\r \\\\)."""
+    return re.sub(r"\\(.)", lambda m: {"s": " ", "n": "\n", "t": "\t", "r": "\r"}.get(m.group(1), m.group(1)), value)
+
+
+def split_exec(value: str) -> tuple[str, str, str]:
+    """(prefix, program, rest) of an Exec value, as raw text, so the program
+    can be swapped and the rest kept verbatim. A leading `env` and VAR=value
+    words stay in prefix."""
+    pos = 0
+    prefix_end = 0
+    while True:
+        while pos < len(value) and value[pos] in " \t":
+            pos += 1
+        start = pos
+        if pos < len(value) and value[pos] == '"':
+            pos += 1
+            word = []
+            while pos < len(value):
+                char = value[pos]
+                if char == "\\" and pos + 1 < len(value):
+                    word.append(value[pos + 1])
+                    pos += 2
+                    continue
+                pos += 1
+                if char == '"':
+                    break
+                word.append(char)
+            token = "".join(word)
+        else:
+            while pos < len(value) and value[pos] not in " \t":
+                pos += 1
+            token = unescape(value[start:pos])
+        if token == "env" or (re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", token) and not token.startswith("/")):
+            prefix_end = pos
+            continue
+        return value[:prefix_end] + (" " if prefix_end else ""), token, value[pos:]
+
+
+def quote_exec(path: str) -> str:
+    """An Exec argument per the spec, then string-escaped for the .desktop file."""
+    if re.search(r"[\s\"'\\><~|&;$*?#()`]", path):
+        path = '"' + re.sub(r'(["`$\\])', r"\\\1", path) + '"'
+    return path.replace("\\", "\\\\")
+
+
+def resolve_program(program: str) -> str | None:
+    if not program:
+        return None
+    if not program.startswith("/"):
+        program = shutil.which(program) or ""
+        if not program:
+            return None
+    return os.path.realpath(program)
+
+
+def is_visible(entry: dict[str, str]) -> bool:
+    return (entry.get("Type") == "Application" and entry.get("NoDisplay", "").lower() != "true"
+            and entry.get("Hidden", "").lower() != "true")
+
+
+def edit(text: str, appimage: str, extra: dict[str, str], drop=("DBusActivatable",)) -> str:
+    """Point Exec (main entry and actions) and an existing TryExec at the
+    AppImage, drop the keys in drop, and set the keys in extra (replacing
+    any existing ones) at the end of [Desktop Entry]."""
+    lines = text.splitlines()
+    out: list[str] = []
+    group = None
+    entry_end = None
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            if group == "Desktop Entry" and entry_end is None:
+                entry_end = len(out)
+            group = stripped[1:-1]
+            out.append(line)
+            continue
+        key = stripped.split("=", 1)[0].strip() if "=" in stripped else ""
+        in_entry = group == "Desktop Entry"
+        in_action = bool(group and group.startswith("Desktop Action "))
+        if in_entry and (key in drop or key in extra or key in (KEY, STAMP, REPAIRED)):
+            continue
+        if (in_entry or in_action) and key == "Exec":
+            prefix, _, rest = split_exec(stripped.split("=", 1)[1])
+            out.append(f"Exec={prefix}{quote_exec(appimage)}{rest}")
+            continue
+        if in_entry and key == "TryExec":
+            out.append(f"TryExec={appimage}")
+            continue
+        out.append(line)
+    if entry_end is None:
+        entry_end = len(out)
+    while entry_end > 0 and not out[entry_end - 1].strip():
+        entry_end -= 1
+    ours = [f"{k}={v}" for k, v in extra.items()]
+    out[entry_end:entry_end] = ours
+    return "\n".join(out).rstrip("\n") + "\n"
+
+
+# --- files ---------------------------------------------------------------------
+
+def write_atomic(path: Path, data: bytes, mode: int = 0o644) -> None:
+    if DRY:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.parent / f".kibby-appimages-{os.getpid()}.tmp"
+    temporary.write_bytes(data)
+    os.chmod(temporary, mode)
+    os.replace(temporary, path)
+
+
+def backup(path: Path, once: bool = False) -> Path | None:
+    """Copy path into BACKUP. once: only if no copy of that name is there yet
+    (an app that rewrites its entry on every run would pile them up)."""
+    BACKUP.mkdir(parents=True, exist_ok=True)
+    if once and any(BACKUP.glob(f"{path.name}.2*")):
+        return None
+    target = BACKUP / f"{path.name}.{time.strftime('%Y%m%d-%H%M%S')}"
+    if not DRY:
+        shutil.copy2(path, target)
+    return target
+
+
+def app_dirs() -> list[Path]:
+    dirs = [APPS]
+    for d in (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":"):
+        if d:
+            dirs.append(Path(d) / "applications")
+    return dirs
+
+
+def scan_entries() -> list[tuple[Path, str, dict[str, str], str]]:
+    """(path, desktop id, [Desktop Entry] keys, text) for every entry, first dir wins."""
+    seen, found = set(), []
+    for base in app_dirs():
+        if not base.is_dir():
+            continue
+        for path in sorted(base.rglob("*.desktop")):
+            desktop_id = path.relative_to(base).as_posix().replace("/", "-")
+            if desktop_id in seen or not path.is_file():
+                continue
+            seen.add(desktop_id)
+            try:
+                text = path.read_text(errors="replace")
+            except OSError:
+                continue
+            found.append((path, desktop_id, groups(text).get("Desktop Entry", {}), text))
+    return found
+
+
+def stamp_of(path: Path) -> str:
+    st = path.stat()
+    return f"{st.st_size}:{st.st_mtime_ns}"
+
+
+def settle(path: Path, quiet_for: float = 2.0, limit: float = 300.0) -> bool:
+    """Wait until a file being copied or downloaded stops changing."""
+    deadline = time.monotonic() + limit
+    last = None
+    while time.monotonic() < deadline:
+        try:
+            now = stamp_of(path)
+        except FileNotFoundError:
+            return False
+        age = time.time() - path.stat().st_mtime
+        if now == last and age >= quiet_for:
+            return True
+        last = now
+        time.sleep(0.5 if age >= quiet_for else min(quiet_for, 1.0))
+    return False
+
+
+# --- one AppImage ----------------------------------------------------------------
+
+def png_edge(data: bytes) -> int:
+    if data[:8] != b"\x89PNG\r\n\x1a\n" or len(data) < 24:
+        return 0
+    return min(int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big"))
+
+
+def kind_of(data: bytes) -> str | None:
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    head = data[:2048].lstrip()
+    if head.startswith(b"<?xml") or head.startswith(b"<svg") or b"<svg" in head:
+        return "svg"
+    if head.startswith(b"/* XPM */"):
+        return "xpm"
+    return None
+
+
+def extract_icon(appimage: Path, files: list[str], icon_name: str | None, slug: str) -> str | None:
+    """The best icon inside the AppImage, copied to ICONS; its absolute path."""
+    names = []
+    if icon_name:
+        stem = Path(icon_name).stem if "/" in icon_name or icon_name.endswith((".png", ".svg", ".xpm")) else icon_name
+        pattern = re.compile(
+            rf"^(?:{re.escape(stem)}\.(?:png|svg|xpm)"
+            rf"|usr/share/icons/hicolor/[^/]+/apps/{re.escape(stem)}\.(?:png|svg)"
+            rf"|usr/share/pixmaps/{re.escape(stem)}\.(?:png|svg|xpm))$")
+        names = [n for n in files if pattern.match(n)]
+    pngs, svgs, others = [], [], []
+    for name in names + [".DirIcon"]:
+        data = ai_read(appimage, name)
+        if not data:
+            continue
+        kind = kind_of(data)
+        if kind == "png":
+            pngs.append((png_edge(data), data))
+        elif kind == "svg":
+            svgs.append(data)
+        elif kind:
+            others.append((kind, data))
+    pngs.sort(key=lambda pair: pair[0], reverse=True)
+    if pngs and pngs[0][0] >= 128:
+        kind, data = "png", pngs[0][1]
+    elif svgs:
+        kind, data = "svg", svgs[0]
+    elif pngs:
+        kind, data = "png", pngs[0][1]
+    elif others:
+        kind, data = others[0]
+    else:
+        return None
+    target = ICONS / f"{slug}.{kind}"
+    for ext in ("png", "svg", "xpm"):
+        old = ICONS / f"{slug}.{ext}"
+        if old != target and old.exists() and not DRY:
+            old.unlink()
+    if not target.exists() or target.read_bytes() != data:
+        write_atomic(target, data)
+    return str(target)
+
+
+def display_name(appimage: Path) -> str:
+    name = re.sub(r"\.appimage$", "", appimage.name, flags=re.I)
+    name = re.sub(r"[-_.](x86[-_]64|amd64|aarch64|arm64|x64|linux|Linux|AppImage)\b", "", name)
+    name = re.sub(r"[-_ ]v?\d+(\.\d+)+.*$", "", name)
+    return re.sub(r"[_]+", " ", name).strip() or appimage.stem
+
+
+def icon_resolves(name: str) -> bool:
+    if not name:
+        return False
+    if name.startswith("/"):
+        return os.path.isfile(name)
+    finder = shutil.which("kiconfinder6")
+    if not finder:
+        return True  # can't tell; leave it alone
+    # Offscreen and without the session's display: it must never connect to it.
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("WAYLAND_DISPLAY", "DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE")}
+    env["QT_QPA_PLATFORM"] = "offscreen"
+    result = subprocess.run([finder, name], capture_output=True, text=True, check=False, env=env)
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
+def sanitize(desktop_id: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", desktop_id).strip("-.") or "appimage"
+
+
+class Sync:
+    def __init__(self, folders: list[Path]):
+        self.folders = folders
+        self.changed = False
+        self.written_ids: set[str] = set()
+        self.entries = scan_entries()
+        # Entries this tool owns, by AppImage path.
+        self.owned: dict[str, list[tuple[Path, dict[str, str], str]]] = {}
+        for path, _, keys, text in self.entries:
+            if path.parent == APPS and KEY in keys:
+                self.owned.setdefault(keys[KEY], []).append((path, keys, text))
+
+    def appimages(self) -> list[Path]:
+        found = []
+        for folder in self.folders:
+            if folder.is_dir():
+                found += [p for p in folder.iterdir()
+                          if p.suffix.lower() == ".appimage" and not p.name.startswith(".") and p.is_file()]
+        def mtime(path: Path) -> float:
+            try:
+                return path.stat().st_mtime
+            except OSError:
+                return 0.0
+        # Newest first, so a fresh version claims the desktop id.
+        return sorted(found, key=mtime, reverse=True)
+
+    def registered_elsewhere(self, appimage: Path) -> Path | None:
+        real = os.path.realpath(appimage)
+        for path, _, keys, _ in self.entries:
+            if KEY in keys or not is_visible(keys):
+                continue
+            _, program, _ = split_exec(keys.get("Exec", ""))
+            if MOUNT.match(program):
+                continue
+            if resolve_program(program) == real:
+                return path
+        return None
+
+    def stale_self_registration(self, appimage: Path, taken: set[Path]):
+        """A user entry whose Exec points into this AppImage's old mount."""
+        for path, _, keys, text in self.entries:
+            if path.parent != APPS or path in taken:
+                continue
+            _, program, _ = split_exec(keys.get("Exec", ""))
+            match = MOUNT.match(program)
+            if match and appimage.name[:6] == match.group(1):
+                return path, keys, text
+        return None
+
+    def remove_owned(self, appimage: str, keep: Path | None = None) -> None:
+        for path, keys, _ in self.owned.get(appimage, []):
+            if path == keep:
+                continue
+            self.remove(path, keys, f"{Path(appimage).name}: dropped {path.name}")
+
+    def remove(self, path: Path, keys: dict[str, str], why: str) -> None:
+        if keys.get(REPAIRED) == "true":
+            saved = backup(path)
+            say(f"{why} (repaired entry, backup {saved})")
+        else:
+            say(why)
+            icon = keys.get("Icon", "")
+            if icon.startswith(str(ICONS) + "/") and not DRY:
+                Path(icon).unlink(missing_ok=True)
+        if not DRY:
+            path.unlink(missing_ok=True)
+        self.changed = True
+
+    def free_id(self, wanted: str, appimage: str) -> str:
+        taken = {desktop_id for path, desktop_id, keys, _ in self.entries
+                 if not (path.parent == APPS and keys.get(KEY) == appimage)}
+        taken |= self.written_ids
+        for candidate in (wanted, f"appimage-{wanted}",
+                          f"appimage-{wanted}-{hashlib.md5(appimage.encode()).hexdigest()[:6]}"):
+            if f"{candidate}.desktop" not in taken:
+                return candidate
+        return f"appimage-{hashlib.md5(appimage.encode()).hexdigest()}"
+
+    def run(self) -> None:
+        appimages = self.appimages()
+        present = {str(p) for p in appimages}
+        # Owned entries whose AppImage is gone.
+        for appimage, owned in list(self.owned.items()):
+            if appimage not in present:
+                for path, keys, _ in owned:
+                    self.remove(path, keys, f"{Path(appimage).name}: gone, removed {path.name}")
+                del self.owned[appimage]
+        taken: set[Path] = set()
+        for appimage in appimages:
+            try:
+                self.one(appimage, taken)
+            except Exception as error:  # one bad file must not stop the rest
+                say(f"{appimage.name}: skipped ({error})")
+        if self.changed and not DRY and shutil.which("update-desktop-database"):
+            subprocess.run(["update-desktop-database", "-q", str(APPS)], check=False)
+        self.poke_if_edited()
+
+    def poke_if_edited(self) -> None:
+        """Make the launcher rescan when an entry was rewritten in place."""
+        newest = 0
+        for path in APPS.rglob("*.desktop"):
+            try:
+                newest = max(newest, path.stat().st_mtime_ns)
+            except OSError:
+                pass
+        mark = STATE / "seen-mtime"
+        try:
+            seen = int(mark.read_text().strip())
+        except (OSError, ValueError):
+            seen = 0
+        if newest <= seen or DRY:
+            return
+        poke = APPS / ".kibby-appimages-rescan"
+        poke.touch()
+        poke.unlink()
+        mark.write_text(f"{newest}\n")
+        debug("entries changed since the last run: asked the launcher to rescan")
+
+    def one(self, appimage: Path, taken: set[Path]) -> None:
+        key = str(appimage)
+        owned = self.owned.get(key, [])
+        stamp = stamp_of(appimage)
+
+        # Repaired or written, and nothing changed since: done.
+        if owned and all(k.get(STAMP) == stamp for _, k, _ in owned):
+            path, keys, _ = owned[0]
+            if keys.get(REPAIRED) == "true" or not self.registered_elsewhere(appimage):
+                debug(f"{appimage.name}: current ({path.name})")
+                taken.add(path)
+                self.remove_owned(key, keep=path)
+                return
+
+        elsewhere = self.registered_elsewhere(appimage)
+        if elsewhere:
+            debug(f"{appimage.name}: registered by {elsewhere}")
+            self.remove_owned(key)
+            return
+
+        if not settle(appimage):
+            say(f"{appimage.name}: still changing, will retry on the next change")
+            return
+        stamp = stamp_of(appimage)
+        if LIB.appimage_get_type(bytes(appimage), False) not in (1, 2):
+            say(f"{appimage.name}: not a readable AppImage, skipped")
+            return
+        if LIB.appimage_shall_not_be_integrated(bytes(appimage)):
+            debug(f"{appimage.name}: X-AppImage-Integrate=false")
+            self.remove_owned(key)
+            return
+
+        if not os.access(appimage, os.X_OK):
+            if appimage.is_symlink():
+                say(f"{appimage.name}: link to a file that is not executable, skipped")
+                return
+            if not DRY:
+                os.chmod(appimage, appimage.stat().st_mode | stat.S_IXUSR)
+            say(f"{appimage.name}: made executable (u+x)")
+            stamp = stamp_of(appimage)
+
+        files = ai_files(appimage)
+        inner_name = next((n for n in files if "/" not in n and n.endswith(".desktop")), None)
+        inner_text = (ai_read(appimage, inner_name) or b"").decode(errors="replace") if inner_name else ""
+        inner = groups(inner_text).get("Desktop Entry", {})
+        if inner.get("Type") != "Application":
+            inner_text, inner = "", {}
+
+        extra = {KEY: key, STAMP: stamp}
+
+        stale = self.stale_self_registration(appimage, taken)
+        if stale:
+            path, keys, text = stale
+            slug = sanitize(path.stem)
+            fixes = {}
+            if not icon_resolves(unescape(keys.get("Icon", ""))):
+                fixes["Icon"] = extract_icon(appimage, files, inner.get("Icon") or keys.get("Icon"), slug) or FALLBACK_ICON
+            fixes.update({**extra, REPAIRED: "true"})
+            new = edit(text, key, fixes, drop=())
+            if new != text:
+                saved = backup(path, once=True) if KEY not in keys else None
+                say(f"{appimage.name}: repaired {path.name} (its Exec pointed into a closed AppImage mount"
+                    + (f"; original saved as {saved})" if saved else ")"))
+                write_atomic(path, new.encode(), stat.S_IMODE(path.stat().st_mode))
+                self.changed = True
+            taken.add(path)
+            self.remove_owned(key, keep=path)
+            return
+
+        # An entry of our own.
+        current = next((p for p, k, _ in owned if k.get(REPAIRED) != "true"), None)
+        if current:
+            desktop_id = current.stem
+        else:
+            wanted = sanitize(Path(inner_name).stem) if inner_name else sanitize(display_name(appimage).lower().replace(" ", "-"))
+            desktop_id = self.free_id(wanted, key)
+        icon = extract_icon(appimage, files, inner.get("Icon"), desktop_id) or FALLBACK_ICON
+        ours = {"TryExec": key, "Icon": icon, **extra}
+        if inner_text:
+            if desktop_id != (Path(inner_name).stem if inner_name else ""):
+                debug(f"{appimage.name}: id {desktop_id} (its own id is taken)")
+            text = edit(inner_text, key, ours)
+        else:
+            text = edit("[Desktop Entry]\nType=Application\n"
+                        f"Name={display_name(appimage)}\n"
+                        f"Exec={quote_exec(key)} %U\n"
+                        "Terminal=false\nCategories=Utility;\n",
+                        key, ours)
+        target = APPS / f"{desktop_id}.desktop"
+        old = target.read_text(errors="replace") if target.exists() else None
+        if old != text:
+            write_atomic(target, text.encode())
+            say(f"{appimage.name}: {'updated' if old else 'registered as'} {target.name}"
+                f" ({groups(text)['Desktop Entry'].get('Name', '?')})")
+            self.changed = True
+        taken.add(target)
+        self.written_ids.add(f"{desktop_id}.desktop")
+        self.remove_owned(key, keep=target)
+
+
+def main() -> None:
+    global LIB
+    args = [a for a in sys.argv[1:] if not a.startswith("-")]
+    if args and args[0] not in ("sync",):
+        sys.exit(__doc__)
+    LIB = load_libappimage()
+    folders = [Path(p).expanduser() for p in
+               (os.environ.get("KIBBY_APPIMAGE_DIRS") or str(HOME / "Applications")).split(":") if p]
+    STATE.mkdir(parents=True, exist_ok=True)
+    with open(STATE / "lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        Sync(folders).run()
+
+
+if __name__ == "__main__":
+    main()
