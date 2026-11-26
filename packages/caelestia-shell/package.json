@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "id": "caelestia-shell",
   "name": "Caelestia shell, Kibby fork",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "kind": "overlay",
   "license": "GPL-3.0",
   "description": "The Caelestia Quickshell shell from Kibby's fork (JagritGumber/caelestia-shell, branch kibby): upstream v2.5.0 with touchpad-lock and mic-mute feedback, each window's own app icon in the bar, tray fixes, lock keys behind keyd, memory and battery alerts, notification icons, the profile picture cropper, per-app volume in the OSD on demand, the notification dock for Junco's work items, launcher and recorder changes.",
@@ -12,7 +12,7 @@
       "name": "JagritGumber/caelestia-shell",
       "url": "https://github.com/JagritGumber/caelestia-shell.git",
       "ref": "kibby",
-      "commit": "2b8e096cd507f14859384482eaef03d545162fd2",
+      "commit": "50436820d18098d8620d40b45052eabe3be6c827",
       "license": "GPL-3.0 (a fork of caelestia-dots/shell v2.5.0; see KIBBY.md in the fork)",
       "mode": "checkout",
       "dest": ".config/quickshell/caelestia"
