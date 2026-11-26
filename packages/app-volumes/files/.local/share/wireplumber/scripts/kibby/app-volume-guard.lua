@@ -6,9 +6,16 @@
 -- their own volume over it, and that is remembered instead:
 -- - A PulseAudio client that asks for a volume when it creates its stream gets
 --   it applied by pipewire-pulse a moment after WirePlumber's restore, once the
---   stream's format is settled. Spotify does this, at its own 100 %.
+--   stream's format is settled.
 -- - Spotify 1.2.63 and later is reported to set its own volume again on its
 --   stream when playback resumes or a track changes, ignoring the mixer.
+--
+-- Spotify 1.2.95 (Flatpak, watched on 2026-11-26) did neither. It kept one
+-- stream across tracks and took the mixer's volume as its own (its MPRIS
+-- Volume followed by the next track). Its stream after an ad came up at the
+-- restored volume. Its video ads play through a second stream named
+-- "Chromium", remembered under that name, so this guard cannot hold them. The
+-- guard is therefore off unless KIBBY_APP_VOLUME_GUARD=required.
 --
 -- So for WINDOW_MS after such a moment (the stream appears with a remembered
 -- volume, starts running again, is uncorked, or changes its media name), a
@@ -163,12 +170,14 @@ SimpleEventHook {
       corked = properties ["pulse.corked"] == "true",
       mediaName = properties ["media.name"],
     }
-    guards [node ["bound-id"]] = guard
+    guards [node.id] = guard
     arm (guard, "new stream")
   end
 }:register ()
 
--- PipeWire reuses node ids: a guard ends with its node.
+-- PipeWire reuses node ids: a guard ends with its node. Guards are keyed by
+-- node.id, the global id, because a removed node's proxy is no longer bound
+-- and has no "bound-id" (as in WirePlumber's own node/software-dsp.lua).
 SimpleEventHook {
   name = "node/kibby-app-volume-guard-forget",
   interests = {
@@ -178,7 +187,7 @@ SimpleEventHook {
     },
   },
   execute = function (event)
-    guards [event:get_subject () ["bound-id"]] = nil
+    guards [event:get_subject ().id] = nil
   end
 }:register ()
 
@@ -193,7 +202,7 @@ SimpleEventHook {
   },
   execute = function (event)
     local node = event:get_subject ()
-    local guard = guards [node ["bound-id"]]
+    local guard = guards [node.id]
     if not guard then
       return
     end
@@ -221,12 +230,12 @@ SimpleEventHook {
   },
   execute = function (event)
     local node = event:get_subject ()
-    local guard = guards [node ["bound-id"]]
+    local guard = guards [node.id]
     if not guard then
       return
     end
     if formKey (node.properties) ~= guard.key then
-      guards [node ["bound-id"]] = nil
+      guards [node.id] = nil
       return
     end
     checkCues (guard, node)

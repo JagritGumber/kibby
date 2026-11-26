@@ -2,13 +2,22 @@
   "schemaVersion": 2,
   "id": "app-volumes",
   "name": "App volumes that stick",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "kind": "component",
   "license": "GPL-3.0-or-later",
-  "description": "A WirePlumber 0.5 script that keeps each app's volume from the mixer when the app sets its own: as it opens a stream, resumes, or moves to the next item. Spotify sets its own 100% again on every track. A volume set in the mixer then holds across tracks and restarts.",
+  "description": "A WirePlumber 0.5 script, off until you turn it on, that keeps each app's volume from the mixer when the app sets its own: as it opens a stream, resumes, or moves to the next item. Spotify 1.2.95 does not need it: it takes the mixer's volume as its own.",
   "dependencies": [],
+  "settings": [
+    "KIBBY_APP_VOLUME_GUARD"
+  ],
+  "choices": {
+    "KIBBY_APP_VOLUME_GUARD": [
+      "disabled",
+      "required"
+    ]
+  },
   "notes": [
-    "WirePlumber loads the app-volumes script when it next starts: systemctl --user restart wireplumber (sound stops for about a second)."
+    "Off by default. To turn it on, set KIBBY_APP_VOLUME_GUARD=required in ~/.config/kibby/settings.env, run ./install app-volumes, then systemctl --user restart wireplumber (sound stops for about a second)."
   ],
   "system": {
     "pacman": [
