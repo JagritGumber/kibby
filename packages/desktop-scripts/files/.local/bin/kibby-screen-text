@@ -1,15 +1,80 @@
 #!/usr/bin/env bash
+# OCR a screen region and copy the text, or a translation of it.
+#   kibby-screen-text ocr               copy the text (Super+Shift+X)
+#   kibby-screen-text translate         translate into KIBBY_TRANSLATE_TO (Super+B)
+#   kibby-screen-text translate --ask   pick the language first (Super+Shift+B)
+# KIBBY_TRANSLATE_TO comes from the environment, else from
+# ~/.config/kibby/settings.env, else it is en. It is read on every run.
 
 set -euo pipefail
 
-mode="${1:-ocr}"
-case "$mode" in
-    ocr|translate) ;;
+usage() {
+    printf 'Usage: %s ocr\n       %s translate [--ask]\n' "${0##*/}" "${0##*/}" >&2
+    exit 2
+}
+
+ask=false
+case "${1:-ocr}" in
+    ocr)
+        mode=ocr
+        (( $# <= 1 )) || usage
+        ;;
+    translate)
+        mode=translate
+        if [[ "${2:-}" == --ask ]]; then
+            ask=true
+            shift
+        fi
+        (( $# <= 1 )) || usage
+        ;;
     *)
-        printf 'Usage: %s {ocr|translate}\n' "${0##*/}" >&2
-        exit 2
+        usage
         ;;
 esac
+
+# A language code such as en, zh-CN or pt-BR.
+is_language() {
+    [[ "$1" =~ ^[A-Za-z]{2,3}(-[A-Za-z]{2,4})?$ ]]
+}
+
+# The last KIBBY_TRANSLATE_TO= line wins, as in the installer. An empty value
+# means en, and matching quotes around the value are dropped.
+default_language() {
+    local value="${KIBBY_TRANSLATE_TO:-}"
+    local settings="$HOME/.config/kibby/settings.env"
+    if [[ -z "$value" && -r "$settings" ]]; then
+        value="$(sed -n 's/^[[:space:]]*KIBBY_TRANSLATE_TO[[:space:]]*=[[:space:]]*\(.*[^[:space:]]\)[[:space:]]*$/\1/p' \
+            "$settings" | tail -n 1)"
+        if [[ ${#value} -ge 2 && ( "$value" == \"*\" || "$value" == \'*\' ) ]]; then
+            value="${value:1:${#value}-2}"
+        fi
+    fi
+    printf '%s\n' "${value:-en}"
+}
+
+# Prints the picker's lines: the language to start on first (fuzzel selects
+# the first line), then the rest of the list. A code that is not listed, such
+# as one typed into the picker last time, gets a line of its own.
+picker_lines() {
+    local start="$1" entry found=""
+    local languages=(
+        'en  English'
+        'hi  Hindi'
+        'es  Spanish'
+        'fr  French'
+        'de  German'
+        'ja  Japanese'
+        'ko  Korean'
+        'zh-CN  Chinese (Simplified)'
+    )
+    for entry in "${languages[@]}"; do
+        [[ "${entry%%[[:space:]]*}" == "$start" ]] && found="$entry"
+    done
+    printf '%s\n' "${found:-$start}"
+    for entry in "${languages[@]}"; do
+        [[ "$entry" == "$found" ]] || printf '%s\n' "$entry"
+    done
+}
 
 for command in grim slurp wl-copy notify-send; do
     if ! command -v "$command" >/dev/null 2>&1; then
@@ -17,6 +82,21 @@ for command in grim slurp wl-copy notify-send; do
         exit 1
     fi
 done
+
+# Settle the default before the region is picked, so a bad setting or a
+# missing translator is reported before any work is thrown away.
+if [[ "$mode" == "translate" ]]; then
+    if ! command -v trans >/dev/null 2>&1; then
+        notify-send -u critical "Screen text" "Translate Shell (trans) is not installed."
+        exit 1
+    fi
+    default="$(default_language)"
+    if ! is_language "$default"; then
+        notify-send -u critical "Screen text" \
+            "KIBBY_TRANSLATE_TO is not a language code: $default"
+        exit 1
+    fi
+fi
 
 runtime_dir="${XDG_RUNTIME_DIR:-/tmp}"
 image="$(mktemp --tmpdir="$runtime_dir" kibby-screen-text.XXXXXX.png)"
@@ -57,36 +137,25 @@ result="$text"
 title="OCR copied"
 
 if [[ "$mode" == "translate" ]]; then
-    if ! command -v trans >/dev/null 2>&1; then
-        notify-send -u critical "Screen text" "Translate Shell (trans) is not installed."
-        exit 1
-    fi
+    target="$default"
 
-    target="${KIBBY_TRANSLATE_TARGET:-}"
-    if [[ -z "$target" ]]; then
-        if command -v fuzzel >/dev/null 2>&1; then
-            choice="$(printf '%s\n' \
-                'en  English' \
-                'hi  Hindi' \
-                'es  Spanish' \
-                'fr  French' \
-                'de  German' \
-                'ja  Japanese' \
-                'ko  Korean' \
-                'zh-CN  Chinese (Simplified)' \
-                | fuzzel --dmenu --prompt='Translate to: ')" || exit 0
-            target="${choice%%[[:space:]]*}"
-        else
-            target="en"
+    # --ask: the picker starts on the last language picked here, else on the
+    # default. The pick is remembered for the picker only; Super+B keeps
+    # translating into KIBBY_TRANSLATE_TO. Without fuzzel, the default is used.
+    if $ask && command -v fuzzel >/dev/null 2>&1; then
+        last_file="${XDG_STATE_HOME:-$HOME/.local/state}/kibby/screen-text-language"
+        last="$(cat "$last_file" 2>/dev/null)" || true
+        is_language "$last" || last="$default"
+        choice="$(picker_lines "$last" | fuzzel --dmenu --prompt='Translate to: ')" || exit 0
+        target="${choice%%[[:space:]]*}"
+        [[ -n "$target" ]] || exit 0
+        if ! is_language "$target"; then
+            notify-send -u critical "Screen text" "Unknown language code: $target"
+            exit 1
         fi
+        { mkdir -p "${last_file%/*}" && printf '%s\n' "$target" >"$last_file"; } 2>/dev/null || true
     fi
 
-    [[ -n "$target" ]] || exit 0
-    # A language code such as en, zh-CN or pt-BR; anything else is refused.
-    if [[ ! "$target" =~ ^[A-Za-z]{2,3}(-[A-Za-z]{2,4})?$ ]]; then
-        notify-send -u critical "Screen text" "Unknown language code: $target"
-        exit 1
-    fi
     if grep -qP '\p{Han}' <<<"$text"; then
         translation_input="${text//$'\n'/}"
     else

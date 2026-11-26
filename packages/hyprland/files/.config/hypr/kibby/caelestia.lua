@@ -52,7 +52,9 @@ replaceBind("SUPER + R", colourPicker,
 replaceBind("SUPER + SHIFT + X", hl.dsp.exec_cmd(screenText .. " ocr"),
     { description = "Screen text: OCR region to clipboard" })
 replaceBind("SUPER + B", hl.dsp.exec_cmd(screenText .. " translate"),
-    { description = "Screen text: OCR, translate, and copy" })
+    { description = "Screen text: OCR, translate into the default language, and copy" })
+replaceBind("SUPER + SHIFT + B", hl.dsp.exec_cmd(screenText .. " translate --ask"),
+    { description = "Screen text: OCR, ask for the language, translate, and copy" })
 replaceBind("SUPER + V", hl.dsp.exec_cmd("pkill fuzzel || caelestia clipboard"),
     { description = "Caelestia: clipboard history" })
 replaceBind("SUPER + period", hl.dsp.exec_cmd("pkill fuzzel || caelestia emoji -p"),
