@@ -2,11 +2,14 @@
   "schemaVersion": 2,
   "id": "desktop-scripts",
   "name": "Desktop scripts",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "kind": "component",
   "license": "GPL-3.0-or-later",
   "description": "The helpers the Hyprland binds call: mic mute with a toast, touchpad lock state, OCR and translate a screen region, swap warning, Zoom mouse mode, the recorder keep-alive, the random-wallpaper wrapper around caelestia, the sleep hook, and clipboard history services.",
   "dependencies": [],
+  "settings": [
+    "KIBBY_TRANSLATE_TO"
+  ],
   "services": [
     {
       "unit": "cliphist@.service",

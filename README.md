@@ -15,7 +15,7 @@ It runs on Arch Linux and CachyOS, with Hyprland 0.57 or newer (the Lua config).
 | `material-dolphin` | A Qt style plugin over Darkly. It gives Dolphin and the KDE file dialog Caelestia's Material look. Built from source. |
 | `tray-standin` | A kded module, so the system tray works without Plasma. Built from source. |
 | `wispr-glow` | While you dictate with Wispr Flow, the screen edges glow in the wallpaper's colours and ripple with your voice, and bars along the bottom edge move with each word. Errors turn the glow red. Wispr's own bar stays hidden. See [Wispr glow](#wispr-glow) below. |
-| `desktop-scripts` | The helpers the binds call: mic mute, touchpad state, screen OCR, the recorder, the sleep hook, and clipboard history. |
+| `desktop-scripts` | The helpers the binds call: mic mute, touchpad state, screen OCR and translate (Super+B translates into `KIBBY_TRANSLATE_TO`, Super+Shift+B asks for the language), the recorder, the sleep hook, and clipboard history. |
 | `app-volumes` | Off until you set `KIBBY_APP_VOLUME_GUARD=required`. Each app keeps the volume you set for it in a mixer, even when the app sets its own as it opens a stream, resumes or changes track. A WirePlumber script. Spotify 1.2.95 does not need it: it takes the mixer's volume as its own. |
 | `mic-mute-led` | Keeps a laptop's mic-mute LED in step with PipeWire. |
 | `appimage-icons` | Shows each AppImage's real icon in Dolphin. |
@@ -104,6 +104,7 @@ The Caelestia shell from Kibby's fork has a dock for the work Junco, the mail ap
 `~/.config/kibby/settings.env` holds everything that differs per machine or person:
 - browser
 - whether an open Dolphin restarts after a wallpaper change
+- the language Super+B translates screen text into
 - monitor and scale
 - numlock
 - touchpad device

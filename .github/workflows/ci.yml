@@ -24,6 +24,9 @@ jobs:
           python3 -m py_compile install
           grep -rlE '^#!.*\b(ba)?sh\b' packages | while read -r f; do bash -n "$f"; done
 
+      - name: kibby-screen-text arguments and languages (stand-in tools)
+        run: packages/desktop-scripts/tests/kibby-screen-text.sh
+
       - name: wispr-glow cava range matches
         run: |
           dir=packages/wispr-glow/files/.config/quickshell/wispr-glow
